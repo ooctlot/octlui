@@ -6,6 +6,8 @@ use octlui::geometry::*;
 use octlui::style::*;
 use octlui::*;
 
+const MAX_COUNT: i32 = 50;
+
 struct State {
     value: i32,
 }
@@ -24,12 +26,12 @@ fn reset(state: &mut State, cx: &mut Context<State>, _: Reset) {
 }
 
 fn change(state: &mut State, cx: &mut Context<State>, action: &Change) {
-    state.value = (state.value + action.amount).clamp(0, 40);
+    state.value = (state.value + action.amount).clamp(0, MAX_COUNT);
     cx.notify();
 }
 
 fn on_click_increment(state: &mut State, cx: &mut Context<State>, _: &events::ClickEvent) {
-    state.value = (state.value + 1).clamp(0, 40);
+    state.value = (state.value + 1).clamp(0, MAX_COUNT);
     cx.notify();
 }
 
@@ -51,9 +53,8 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         .column()
         .center()
         .child_gap(24.0)
-        .child(node().text(components::Text::new(format!("Count: {}", state.value)).size(24.0)))
+        .child(node().text(components::Text::new(format!("{}/{MAX_COUNT}", state.value)).size(24.0)))
         .child(
-            // The "value": 10 px per step.
             node()
                 .size(fixed(400.0), fixed(24.0))
                 .corner_radius(12.0)
@@ -61,7 +62,8 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
                 .clip(Clip::X)
                 .child(
                     node()
-                        .size(fixed(state.value as f32 * 10.0), grow())
+                        .size(fraction(state.value as f32 / MAX_COUNT as f32), grow())
+                        .spring(components::Spring::new(components::SpringProps::SIZE))
                         .corner_radius(12.0)
                         .background(Fill::linear(0.0, &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)])),
                 ),
