@@ -1,3 +1,5 @@
+use octlui::geometry::Color;
+use octlui::widgets::button_style;
 use octlui::{components::*, geometry::Vec2, image::ImageId, style::*, *};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -89,7 +91,7 @@ fn gallery(state: &mut Gallery, cx: &mut Cx) -> Node {
                     .width(grow())
                     .padding((10., 7.))
                     .corner_radius(6.)
-                    .background(if feature.id == page.id { 0x245353 } else { NAV })
+                    .style_when(button_style)
                     .text(Text::new(page.title).size(14.).color(0xe4eded))
                     .on_click_action(Select(page.id))
             }));

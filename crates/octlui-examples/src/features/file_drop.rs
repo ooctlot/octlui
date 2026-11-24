@@ -2,7 +2,7 @@ use crate::{Cx, Dropped, Gallery, ui::*};
 use octlui::{Node, events::FileDropEvent, node, style::*};
 
 pub(crate) const CATEGORY: &str = "Interaction";
-pub(crate) const TITLE: &str = "File drops";
+pub(crate) const TITLE: &str = "File drag and drop";
 
 pub(crate) fn view(state: &mut Gallery, cx: &mut Cx) -> Node {
     let result = if state.drop_paths.is_empty() {
@@ -12,10 +12,10 @@ pub(crate) fn view(state: &mut Gallery, cx: &mut Cx) -> Node {
             state
                 .drop_paths
                 .iter()
-                .map(|path| note(path.display().to_string())),
+                .map(|path| note(path.display().to_string()).file_source([path])),
         )
     };
-    page("Drop files from your file manager. Both targets display the paths, using a listener or a typed action.")
+    page("Drop files from your file manager, then drag a listed path into another app.")
         .on_action(cx.listener(|s: &mut Gallery, cx: &mut Cx, action: Dropped| {
             s.drop_paths = action.0;
             cx.notify();

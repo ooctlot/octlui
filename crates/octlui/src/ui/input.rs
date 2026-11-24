@@ -112,6 +112,7 @@ impl Ui {
         if self.focus == key {
             return;
         }
+        let previous_focus = self.focus_snapshot();
         self.reset_input_focus();
         self.focus = key;
         if let Some(editor) = key.and_then(|key| self.states.get_mut(&key))
@@ -119,6 +120,7 @@ impl Ui {
         {
             editor.touch();
         }
+        self.queue_focus_change(previous_focus);
     }
 
     fn reset_input_focus(&mut self) {
@@ -133,9 +135,17 @@ impl Ui {
     }
 
     pub(crate) fn set_window_focus(&mut self, focused: bool) {
+        if !focused {
+            self.pressed_style = None;
+        }
+        if !focused && self.drag_source_press.take().is_some() {
+            self.pressed = None;
+        }
         if self.input.window_focused != focused {
+            let previous_focus = self.focus_snapshot();
             self.reset_input_focus();
             self.input.window_focused = focused;
+            self.queue_focus_change(previous_focus);
         }
     }
 
@@ -178,11 +188,11 @@ impl Ui {
         })
     }
 
-    pub(super) fn click_input(&mut self, point: Vec2) {
-        let Some(i) = self.editor_index() else { return };
+    pub(super) fn click_input(&mut self, point: Vec2) -> bool {
+        let Some(i) = self.editor_index() else { return false };
         let node = &self.arena.nodes[i];
-        let Some(hit) = self.input.hits.get(&node.key) else { return };
-        let Some(editor) = self.states.get_mut(&node.key).and_then(|s| s.editor.as_mut()) else { return };
+        let Some(hit) = self.input.hits.get(&node.key) else { return false };
+        let Some(editor) = self.states.get_mut(&node.key).and_then(|s| s.editor.as_mut()) else { return false };
         let text = node.text.as_ref().unwrap();
         let input = text.input.as_ref().unwrap();
         let now = Instant::now();
@@ -196,6 +206,7 @@ impl Ui {
         let view = editor.view(&self.input_text, text, input, hit.area);
         editor.click(&view, point, extend, count);
         self.input.drag = Some(Drag { key: node.key, count, selection: editor.drag_anchor() });
+        true
     }
 
     pub(super) fn drag_input(&mut self, point: Vec2) -> bool {

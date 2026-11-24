@@ -389,7 +389,7 @@ impl Fill {
 
     /// Interpolates gradient stops and direction. A change between linear and radial
     /// collapses to a solid at the midpoint before expanding into the new gradient.
-    pub(crate) fn interpolate(self, to: Self, t: f32) -> Self {
+    pub fn interpolate(self, to: Self, t: f32) -> Self {
         if t <= 0. {
             return self;
         }

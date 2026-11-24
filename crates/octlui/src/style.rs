@@ -1,5 +1,18 @@
 //! Style enums shared by nodes and components.
 
+/// Interaction state used to resolve a node's appearance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct InteractionState {
+    /// The pointer is over the node or one of its descendants.
+    pub hovered: bool,
+    /// The node has keyboard focus in the active window.
+    pub focused: bool,
+    /// This is the innermost state-styled node under the primary mouse button when it was
+    /// pressed. The state clears on release, window exit, focus loss or drag start.
+    pub pressed: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {
     X,

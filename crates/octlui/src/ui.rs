@@ -19,9 +19,12 @@ use crate::text_input::Editor;
 use std::any::Any;
 use std::sync::Arc;
 use std::time::Duration;
+use winit::data_transfer::DataTransferSend;
 
 mod input;
 pub(crate) use input::{ImeTarget, InputHit, InputKey, PasteTarget};
+
+const DRAG_THRESHOLD: f32 = 5.0;
 
 /// A region that can be hit by the pointer, in paint order.
 pub(crate) struct Hit {
@@ -145,10 +148,13 @@ pub(crate) struct Ui {
     hover: Vec<HoverEntry>,
     tooltip: TooltipState,
     pressed: Option<(u64, MouseButton)>,
+    pressed_style: Option<u64>,
+    drag_source_press: Option<(u64, Vec2)>,
     drag: Option<BarDrag>,
     input: input::InputState,
     pub input_text: ShapedText,
     pub focus: Option<u64>,
+    pub focus_changes: Vec<(ErasedFn, FocusChangeEvent)>,
     pub mods: crate::action::Modifiers,
     layout_dirty: bool,
     position_dirty: bool,
@@ -186,10 +192,13 @@ impl Ui {
             hover: Vec::new(),
             tooltip: TooltipState::default(),
             pressed: None,
+            pressed_style: None,
+            drag_source_press: None,
             drag: None,
             input: input::InputState::default(),
             input_text: ShapedText::default(),
             focus: None,
+            focus_changes: Vec::new(),
             mods: Default::default(),
             layout_dirty: true,
             position_dirty: false,
@@ -207,7 +216,16 @@ impl Ui {
 
     /// Installs a new node tree (the result of a view call).
     pub fn set_root(&mut self, node: Node) {
+        let previous_focus = self.focus_snapshot();
+        let had_focus_target = previous_focus.is_some() || self.focus_idx().is_some();
         self.arena.build(node);
+        self.pressed_style = self.pressed_style.filter(|key| {
+            self.arena.nodes.iter().any(|node| node.key == *key && node.has_state_style())
+        });
+        if had_focus_target && self.focus_idx().is_none() {
+            self.focus_to(None);
+        }
+        self.queue_focus_change(previous_focus);
         self.frame_no += 1;
         let frame = self.frame_no;
         self.scroll_nodes.clear();
@@ -287,6 +305,35 @@ impl Ui {
         self.focus.and_then(|k| self.arena.nodes.iter().position(|n| n.key == k))
     }
 
+    pub fn focused_key(&self) -> Option<u64> {
+        self.input_focus()?;
+        self.focus_idx().map(|i| self.arena.nodes[i].key)
+    }
+
+    fn focus_snapshot(&self) -> Option<(u64, Option<ErasedFn>)> {
+        self.input_focus()?;
+        let node = &self.arena.nodes[self.focus_idx()?];
+        Some((node.key, node.handlers.focus_change.clone()))
+    }
+
+    fn queue_focus_change(&mut self, previous: Option<(u64, Option<ErasedFn>)>) {
+        let current = self.focus_snapshot();
+        if previous.as_ref().map(|(key, _)| key) == current.as_ref().map(|(key, _)| key) {
+            return;
+        }
+        for (snapshot, focused) in [(previous, false), (current, true)] {
+            if let Some((_, Some(listener))) = snapshot {
+                self.focus_changes.push((listener, FocusChangeEvent { focused }));
+            }
+        }
+    }
+
+    pub fn dispatch_focus_changes(&mut self, env: &mut Env) {
+        for (listener, event) in self.focus_changes.drain(..) {
+            env.call(&listener, &event);
+        }
+    }
+
     // ------------------------------------------------------------------ frame
 
     /// Advances animations, lays out if needed and paints. Returns whether animation is
@@ -317,6 +364,12 @@ impl Ui {
         if moved {
             position(&mut self.arena);
         }
+        let focused = self.input_focus();
+        self.arena.update_state_styles(
+            |key| self.hover.iter().any(|entry| entry.key == key),
+            focused,
+            self.pressed_style,
+        );
         let (springs, visual_geometry) = self.update_springs(dt);
         animating |= springs | self.reflow_active;
         animating |= self.tick_tooltip(dt, elapsed, env);
@@ -563,6 +616,7 @@ impl Ui {
         if !t.live {
             if let Some(content) = t.content.clone() {
                 t.arena.build(content);
+                t.arena.update_state_styles(|_| false, None, None);
                 layout(&mut t.arena, self.size, env);
                 t.live = true;
             }
@@ -669,12 +723,27 @@ impl Ui {
 
     pub fn pointer_left(&mut self, env: &mut Env) {
         self.mouse = None;
+        self.pressed_style = None;
+        self.drag_source_press = None;
         for e in std::mem::take(&mut self.hover) {
             if let Some(f) = &e.handler {
                 env.call(f, &HoverEvent { hovered: false });
             }
         }
         self.tooltip.target = None;
+    }
+
+    pub fn drag_data(&mut self, position: Vec2) -> Option<Box<dyn DataTransferSend>> {
+        let (key, _) = self.drag_source_press.take_if(|(_, origin)| {
+            (position - *origin).length() >= DRAG_THRESHOLD
+        })?;
+        let source = self.arena.nodes.iter().find(|node| node.key == key)?.handlers.drag_source.as_ref()?;
+        source()
+    }
+
+    pub fn drag_started(&mut self) {
+        self.pressed = None;
+        self.pressed_style = None;
     }
 
     fn click_target(&self, from: Option<usize>) -> Option<usize> {
@@ -709,15 +778,19 @@ impl Ui {
     }
 
     pub fn pointer_button(&mut self, button: MouseButton, pressed: bool, pos: Option<Vec2>, env: &mut Env) {
+        let left = button == MouseButton::Left;
+        if left {
+            self.pressed_style = None;
+        }
         let moved = pos.is_some() && pos != self.mouse;
         if let Some(p) = pos {
             self.mouse = Some(p);
         }
         let Some(p) = self.mouse else { return };
-        let left = button == MouseButton::Left;
 
         if !pressed {
             if left {
+                self.drag_source_press = None;
                 if moved {
                     self.drag_input(p);
                 }
@@ -748,6 +821,7 @@ impl Ui {
 
         // ---- press ----
         if left {
+            self.drag_source_press = None;
             if let Some(b) = self.bars.iter().rev().find(|b| b.track.contains(p)) {
                 let (start, len, ts, tl) = match b.axis {
                     Axis::X => (b.thumb.x, b.thumb.w, b.track.x, b.track.w),
@@ -762,20 +836,29 @@ impl Ui {
         let hit = self.hit_test(p);
         let mut cur = hit;
         let mut focus = None;
+        let mut drag_source = None;
         let mut down: Option<ErasedFn> = None;
         while let Some(i) = cur {
             let n = &self.arena.nodes[i];
+            if left && self.pressed_style.is_none() && n.has_state_style() {
+                self.pressed_style = Some(n.key);
+            }
             if focus.is_none() && n.focusable {
                 focus = Some(n.key);
             }
             if down.is_none() {
                 down = n.handlers.mouse_down.clone();
             }
+            if left && drag_source.is_none() && n.handlers.drag_source.is_some() {
+                drag_source = Some(n.key);
+            }
             cur = self.parent(i);
         }
         if left {
             self.focus_to(focus);
-            self.click_input(p);
+            if !self.click_input(p) {
+                self.drag_source_press = drag_source.map(|key| (key, p));
+            }
         }
         if let Some(f) = down {
             env.call(&f, &MouseDownEvent { position: p, button, modifiers: self.mods });
@@ -940,6 +1023,7 @@ mod tests {
         value: i32,
         clicks: u32,
         hovered: bool,
+        focus_events: Vec<(&'static str, bool)>,
         dropped: usize,
         text: Arc<str>,
     }
@@ -997,6 +1081,12 @@ mod tests {
             ui.pointer_button(MouseButton::Left, true, p, &mut env);
             ui.pointer_button(MouseButton::Left, false, p, &mut env);
         }
+        fn take_focus_events(&mut self) -> Vec<(&'static str, bool)> {
+            self.cx.info.focus = self.ui.focused_key();
+            let (ui, mut env) = self.env();
+            ui.dispatch_focus_changes(&mut env);
+            std::mem::take(&mut self.state.focus_events)
+        }
         fn key(&mut self, k: Key) {
             let km = std::mem::take(&mut self.keymap);
             {
@@ -1010,6 +1100,51 @@ mod tests {
             ui.mods = mods;
             ui.input_key(key, text, &mut env)
         }
+    }
+
+    #[test]
+    fn focus_changes_follow_clicks_window_activation_and_node_removal() {
+        fn target(id: &'static str, cx: &Context<State>) -> Node {
+            node().id(id).size(100., 100.).focusable(true).on_focus_change(
+                cx.listener(move |state: &mut State, cx: &mut Context<State>, e: &FocusChangeEvent| {
+                    assert_eq!(cx.is_focused(&Id::new(id)), e.focused);
+                    state.focus_events.push((id, e.focused));
+                }),
+            )
+        }
+
+        let mut h = Harness::new(|cx| {
+            node().fill_parent().row().child(target("first", cx)).child(target("second", cx))
+        });
+        h.click(10., 10.);
+        assert_eq!(h.take_focus_events(), [("first", true)]);
+        h.click(10., 10.);
+        assert!(h.take_focus_events().is_empty());
+        h.click(110., 10.);
+        assert_eq!(h.take_focus_events(), [("first", false), ("second", true)]);
+        h.click(250., 10.);
+        assert_eq!(h.take_focus_events(), [("second", false)]);
+
+        h.ui.set_focus(Some(&Id::new("first")));
+        assert_eq!(h.take_focus_events(), [("first", true)]);
+        h.ui.set_window_focus(false);
+        assert_eq!(h.take_focus_events(), [("first", false)]);
+        h.ui.set_window_focus(false);
+        assert!(h.take_focus_events().is_empty());
+        h.ui.set_window_focus(true);
+        assert_eq!(h.take_focus_events(), [("first", true)]);
+
+        h.ui.set_root(node().child(target("first", &h.cx)));
+        assert!(h.take_focus_events().is_empty());
+        h.ui.set_root(node());
+        assert_eq!(h.take_focus_events(), [("first", false)]);
+        h.ui.set_root(node().child(target("first", &h.cx)));
+        assert!(h.take_focus_events().is_empty());
+
+        h.ui.set_focus(Some(&Id::new("first")));
+        assert_eq!(h.take_focus_events(), [("first", true)]);
+        h.ui.set_focus(None);
+        assert_eq!(h.take_focus_events(), [("first", false)]);
     }
 
     #[test]
@@ -1175,6 +1310,126 @@ mod tests {
         assert!(h.state.hovered);
         h.mv(300.0, 10.0);
         assert!(!h.state.hovered);
+    }
+
+    #[test]
+    fn anonymous_nodes_paint_hover_and_focus_styles() {
+        use crate::geometry::Color;
+        use crate::render::DrawOp;
+
+        fn target(base: Color) -> Node {
+            node().size(100., 100.).background(base).style_when(|style, state| {
+                if state.pressed {
+                    style.background(Color::BLACK)
+                } else if state.focused {
+                    style.background(Color::hex(0x0000ff))
+                } else if state.hovered {
+                    style.background(Color::TRANSPARENT)
+                } else {
+                    style
+                }
+            })
+        }
+
+        let red = Color::hex(0xff0000);
+        let green = Color::hex(0x00ff00);
+        let blue = Color::hex(0x0000ff);
+        let mut h = Harness::new(|_| node().row().children([target(red), target(green).focusable(true)]));
+        let fills = |h: &Harness| -> Vec<_> {
+            h.ui.list.ops.iter().filter_map(|op| match op {
+                DrawOp::Quad(quad) => Some(quad.fill),
+                _ => None,
+            }).collect()
+        };
+
+        assert_eq!(fills(&h), [red.to_array(), green.to_array()]);
+        h.mv(20., 20.);
+        h.frame(0.);
+        assert_eq!(fills(&h), [green.to_array()]);
+        {
+            let (ui, mut env) = h.env();
+            ui.pointer_button(MouseButton::Left, true, None, &mut env);
+        }
+        h.frame(0.);
+        assert_eq!(fills(&h), [Color::BLACK.to_array(), green.to_array()]);
+        {
+            let (ui, mut env) = h.env();
+            ui.pointer_button(MouseButton::Left, false, None, &mut env);
+        }
+        h.frame(0.);
+        assert_eq!(fills(&h), [green.to_array()]);
+        {
+            let (ui, mut env) = h.env();
+            ui.pointer_button(MouseButton::Left, true, None, &mut env);
+            ui.pointer_left(&mut env);
+        }
+        h.frame(0.);
+        assert_eq!(fills(&h), [red.to_array(), green.to_array()]);
+        h.mv(120., 20.);
+        h.frame(0.);
+        assert_eq!(fills(&h), [red.to_array()]);
+        h.click(120., 20.);
+        h.frame(0.);
+        assert_eq!(fills(&h), [red.to_array(), blue.to_array()]);
+        let (ui, mut env) = h.env();
+        ui.pointer_left(&mut env);
+        ui.set_window_focus(false);
+        h.frame(0.);
+        assert_eq!(fills(&h), [red.to_array(), green.to_array()]);
+    }
+
+    #[test]
+    fn file_source_starts_after_movement_and_suppresses_the_click() {
+        use winit::data_transfer::{SendData, TypeHint};
+
+        let paths = ["first file.txt", "second#file.txt"];
+        let mut h = Harness::new(|cx| {
+            node().size(grow(), grow()).child(
+                node().size(fixed(100.0), fixed(100.0))
+                    .on_click(cx.listener(clicked))
+                    .file_source(paths)
+                    .child(node().size(fixed(40.0), fixed(40.0)).on_hover(cx.listener(hover))),
+            )
+        });
+        let origin = Some(Vec2::new(10.0, 10.0));
+        let below_threshold = Vec2::new(12.0, 11.0);
+        let outside_source = Vec2::new(120.0, 10.0);
+        let (ui, mut env) = h.env();
+        ui.pointer_button(MouseButton::Left, true, origin, &mut env);
+        assert!(ui.drag_data(below_threshold).is_none());
+        ui.pointer_button(MouseButton::Left, false, origin, &mut env);
+        assert!(ui.drag_data(outside_source).is_none());
+        assert_eq!(h.state.clicks, 1);
+
+        let (ui, mut env) = h.env();
+        ui.pointer_button(MouseButton::Left, true, origin, &mut env);
+        let transfer = ui.drag_data(outside_source).unwrap();
+        let Some(SendData::Uris(uris)) = transfer.data_for_type(&TypeHint::UriList) else {
+            panic!("file source must provide an outgoing URI list");
+        };
+        let actual: Vec<_> = uris.iter().map(|uri| crate::app::uri_to_path(uri).unwrap()).collect();
+        let expected = paths.map(|path| std::path::absolute(path).unwrap());
+        assert_eq!(actual, expected);
+        assert!(ui.drag_data(outside_source).is_none());
+        ui.drag_started();
+        ui.pointer_button(MouseButton::Left, false, origin, &mut env);
+        assert_eq!(h.state.clicks, 1);
+    }
+
+    #[test]
+    fn file_source_press_is_cleared_on_focus_loss_or_removal() {
+        let mut h = Harness::new(|_| node().size(grow(), grow()).file_source(["file.txt"]));
+        let origin = Some(Vec2::new(10.0, 10.0));
+        let moved = Vec2::new(40.0, 10.0);
+        let (ui, mut env) = h.env();
+        ui.pointer_button(MouseButton::Left, true, origin, &mut env);
+        ui.set_window_focus(false);
+        assert!(ui.drag_data(moved).is_none());
+
+        ui.set_window_focus(true);
+        ui.pointer_button(MouseButton::Left, true, origin, &mut env);
+        ui.set_root(node().size(grow(), grow()).file_source(std::iter::empty::<&str>()));
+        assert!(ui.drag_data(moved).is_none());
     }
 
     #[test]

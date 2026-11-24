@@ -6,22 +6,28 @@ use crate::ctx::{ErasedFn, Listener};
 use crate::events::*;
 use crate::geometry::{CornerRadius, Fill, Padding};
 use crate::id::Id;
-use crate::style::{Align, Clip, Direction, Sizing};
+use crate::style::{Align, Clip, Direction, InteractionState, Sizing};
 use std::any::TypeId;
+use std::path::{self, Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use winit::data_transfer::{DataTransferSend, DataTransferSendBuilder, SendData, TypeHint};
 
 type FileDropAction = Rc<dyn Fn(&FileDropEvent) -> Box<dyn Action>>;
+type DragSource = Rc<dyn Fn() -> Option<Box<dyn DataTransferSend>>>;
+pub(crate) type StyleCallback = Rc<dyn Fn(Appearance, InteractionState) -> Appearance>;
 
 #[derive(Clone, Default)]
 pub(crate) struct Handlers {
     pub click: Option<ErasedFn>,
     pub mouse_down: Option<ErasedFn>,
     pub hover: Option<ErasedFn>,
+    pub focus_change: Option<ErasedFn>,
     pub key_down: Option<ErasedFn>,
     pub text_change: Option<ErasedFn>,
     pub file_drop: Option<ErasedFn>,
     pub file_drop_action: Option<FileDropAction>,
+    pub drag_source: Option<DragSource>,
     pub actions: Vec<(TypeId, ErasedFn)>,
     /// Dispatched (through the action system) when the node is clicked with the left button.
     pub click_action: Option<Box<dyn Action>>,
@@ -69,6 +75,7 @@ pub struct Node {
     pub(crate) focusable: bool,
     #[octlui::property(boxed)]
     pub(crate) appearance: Option<Box<Appearance>>,
+    pub(crate) style_callback: Option<StyleCallback>,
     #[octlui::property(boxed, into)]
     pub(crate) text: Option<Box<Text>>,
     #[octlui::property(boxed, into)]
@@ -149,6 +156,24 @@ impl Node {
         self
     }
 
+    /// Resolves the node's background and border from its hover, focus and pressed state.
+    /// Each call starts with the appearance declared on the node. The callback runs on the
+    /// first frame after a view build and again when this node's interaction state changes.
+    /// A state-styled node participates in pointer hit testing without an explicit ID.
+    ///
+    /// ```
+    /// use octlui::node;
+    ///
+    /// let button = node().text("Save").background(0x196963).style_when(|style, state| {
+    ///     if state.hovered { style.background(0x124d49) } else { style }
+    /// });
+    /// ```
+    #[must_use]
+    pub fn style_when(mut self, callback: impl Fn(Appearance, InteractionState) -> Appearance + 'static) -> Self {
+        self.style_callback = Some(Rc::new(callback));
+        self
+    }
+
     // ---- handlers ----
 
     /// Called when the primary button is pressed and released on this node.
@@ -172,6 +197,13 @@ impl Node {
     #[must_use]
     pub fn on_hover(mut self, l: Listener<HoverEvent>) -> Self {
         self.handlers.hover = Some(l.f);
+        self
+    }
+    /// Called when this node gains or loses keyboard focus, including when its window
+    /// gains or loses focus or the focused node is removed.
+    #[must_use]
+    pub fn on_focus_change(mut self, l: Listener<FocusChangeEvent>) -> Self {
+        self.handlers.focus_change = Some(l.f);
         self
     }
     /// Called for key presses when this node is the innermost focused node with such a handler
@@ -200,6 +232,36 @@ impl Node {
         map: impl Fn(&FileDropEvent) -> A + 'static,
     ) -> Self {
         self.handlers.file_drop_action = Some(Rc::new(move |event| Box::new(map(event))));
+        self
+    }
+    /// Makes these local paths available to other apps when dragged with the primary mouse button.
+    ///
+    /// Relative paths are resolved against the working directory at drag time. An empty list
+    /// disables the source. The destination can copy the files on backends with outgoing drag
+    /// support.
+    #[must_use]
+    pub fn file_source<P: AsRef<Path>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
+        let paths: Vec<PathBuf> = paths.into_iter().map(|p| p.as_ref().to_owned()).collect();
+        if paths.is_empty() {
+            self.handlers.drag_source = None;
+            return self;
+        }
+        self.drag_source(move || {
+            let uris = paths.iter()
+                .map(|path| url::Url::from_file_path(path::absolute(path).ok()?).ok().map(String::from))
+                .collect::<Option<Vec<_>>>()?;
+            Some(DataTransferSendBuilder::new(uris)
+                .with_type(TypeHint::UriList, |uris, _| Some(SendData::Uris(uris.clone())))
+                .build())
+        })
+    }
+    /// Supplies native drag data in any format supported by the active winit backend.
+    ///
+    /// The factory runs once per drag gesture and can return `None` to skip that drag. The
+    /// destination is offered a copy operation. Use [`crate::data_transfer`] to build the payload.
+    #[must_use]
+    pub fn drag_source(mut self, make_data: impl Fn() -> Option<Box<dyn DataTransferSend>> + 'static) -> Self {
+        self.handlers.drag_source = Some(Rc::new(make_data));
         self
     }
     /// Handles action `A` dispatched at or below this node.

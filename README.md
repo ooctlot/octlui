@@ -90,6 +90,9 @@ Contexts are the `key_context` names along the focus path; deeper matches win, l
 win ties. `Keystroke::parse("ctrl-shift-s")` is available too.
 
 **Focus.** `.focusable(true)` nodes take focus when clicked (or via `cx.focus(id)`).
+Use `.on_focus_change(cx.listener(handler))` to receive a `FocusChangeEvent` when a node
+gains or loses keyboard focus. The event's `focused` field matches `cx.is_focused(id)`
+for that node.
 
 ## Node
 
@@ -98,7 +101,7 @@ Always present: `width`/`height` (`fit()`, `grow()`, `fixed(x)`, `fraction(f)` e
 (`TopToBottom|BottomToTop|LeftToRight|RightToLeft`), `child_gap`.
 
 Optional: `id`, `padding`, `corner_radius` (per corner), `aspect_ratio`, `clip`
-(`None|X|Y|XY`), `key_context`, `focusable`, `on_file_drop`.
+(`None|X|Y|XY`), `key_context`, `focusable`, `on_file_drop`, `file_source`, `drag_source`.
 
 Optional components (each boxed, so plain nodes stay small):
 
@@ -235,6 +238,9 @@ redraw, including for images whose dimensions determine their size. A synchronou
 ## Platform notes
 
 * File drops use winit 0.31's data-transfer API (`UriList`); `FileDropEvent` carries paths.
+* Use `node().file_source(["report.pdf", "summary.txt"])` to drag local files into other apps.
+  The node offers a copy. Use `Node::drag_source` with `octlui::data_transfer` for other formats
+  supported by the active winit backend.
 * Requires a Rust toolchain recent enough for `winit 0.31.0-beta.4` and `wgpu 30`.
 * Tests: `cargo test` (GPU tests skip if no adapter is found; CI uses lavapipe).
 

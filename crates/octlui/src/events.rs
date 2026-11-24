@@ -36,6 +36,14 @@ pub struct HoverEvent {
 }
 impl Event for HoverEvent {}
 
+/// A change to a node's keyboard focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusChangeEvent {
+    /// Whether the node has keyboard focus after the change.
+    pub focused: bool,
+}
+impl Event for FocusChangeEvent {}
+
 #[derive(Clone, Debug)]
 pub struct KeyDownEvent {
     pub key: Key,

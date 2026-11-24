@@ -532,13 +532,22 @@ impl<S: 'static> Window<S> {
         self.cx.info = WindowInfo {
             size: self.ui.size,
             scale: self.ui.scale,
-            focus: self.ui.focus,
+            focus: self.ui.focused_key(),
             hover: self.ui.hover_keys(),
         };
     }
 
+    fn dispatch_focus_changes(&mut self) {
+        if !self.ui.focus_changes.is_empty() {
+            self.sync_info();
+            let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+            self.ui.dispatch_focus_changes(&mut env);
+        }
+    }
+
     /// Applies effects requested by handlers until none are left.
     fn pump(&mut self, app: &mut AppContext) {
+        self.dispatch_focus_changes();
         for _ in 0..64 {
             let effects = std::mem::take(&mut self.cx.effects);
             let unhandled = std::mem::take(&mut self.ui.unhandled);
@@ -555,10 +564,12 @@ impl<S: 'static> Window<S> {
                     Effect::CloseWindow => self.closed = true,
                     Effect::Focus(id) => {
                         self.ui.set_focus(Some(&id));
+                        self.dispatch_focus_changes();
                         self.dirty = true;
                     }
                     Effect::Blur => {
                         self.ui.set_focus(None);
+                        self.dispatch_focus_changes();
                         self.dirty = true;
                     }
                     Effect::SetTitle(t) => self.win.set_title(&t),
@@ -583,6 +594,14 @@ impl<S: 'static> Window<S> {
     fn logical(&self, p: winit::dpi::PhysicalPosition<f64>) -> Vec2 {
         let s = self.ui.scale as f64;
         Vec2::new((p.x / s) as f32, (p.y / s) as f32)
+    }
+
+    fn start_drag(&mut self, el: &dyn ActiveEventLoop, position: Vec2) {
+        if let Some(data) = self.ui.drag_data(position)
+            && el.start_drag(self.win.id(), data, &[DndAction::Copy], None).is_ok()
+        {
+            self.ui.drag_started();
+        }
     }
 
     fn drag_position(&mut self, el: &dyn ActiveEventLoop, id: DataTransferId, position: Option<Vec2>) {
@@ -735,6 +754,7 @@ impl<S: 'static> UiWindow for Window<S> {
 
             WindowEvent::PointerMoved { position, primary: true, .. } => {
                 let p = self.logical(position);
+                self.start_drag(el, p);
                 self.sync_info();
                 let changed = {
                     let mut env = Env { state: &mut self.state, cx: &mut self.cx };
@@ -746,7 +766,10 @@ impl<S: 'static> UiWindow for Window<S> {
                 self.input_cursor();
                 self.pump(app);
             }
-            WindowEvent::PointerLeft { primary: true, .. } => {
+            WindowEvent::PointerLeft { position, primary: true, .. } => {
+                if let Some(position) = position {
+                    self.start_drag(el, self.logical(position));
+                }
                 self.sync_info();
                 {
                     let mut env = Env { state: &mut self.state, cx: &mut self.cx };
@@ -801,6 +824,7 @@ impl<S: 'static> UiWindow for Window<S> {
                     self.paste = None;
                 }
                 self.ui.set_window_focus(focused);
+                self.pump(app);
                 self.sync_ime();
                 self.win.request_redraw();
             }

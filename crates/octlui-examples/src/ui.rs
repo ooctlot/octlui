@@ -54,16 +54,10 @@ pub(crate) fn row() -> Node {
 }
 
 pub(crate) fn button(text: impl Into<std::sync::Arc<str>>) -> Node {
-    node()
+    octlui::widgets::button(Text::new(text).size(14.).color(INK).wrap(TextWrap::None))
         .padding((12., 8.))
         .corner_radius(6.)
-        .background(ACCENT)
-        .text(
-            Text::new(text)
-                .size(14.)
-                .color(0xf3fbfa)
-                .wrap(TextWrap::None),
-        )
+        .background(0xc3e3da)
 }
 
 pub(crate) fn control(text: &str, cx: &Cx, change: impl Fn(&mut Gallery) + 'static) -> Node {

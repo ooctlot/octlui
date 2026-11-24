@@ -11,7 +11,7 @@ use crate::components::*;
 use crate::geometry::{Padding, Rect, Vec2};
 use crate::id::{Id, mix};
 use crate::image::ImageStore;
-use crate::node::{Handlers, Node};
+use crate::node::{Handlers, Node, StyleCallback};
 use crate::style::*;
 use crate::text::{ShapedText, TextMeasurer};
 use crate::text_input::{input_wrap, normalize};
@@ -45,6 +45,7 @@ pub(crate) struct LNode {
     pub handlers: Handlers,
 
     pub appearance: Option<Box<Appearance>>,
+    state_style: Option<Box<StateStyle>>,
     pub text: Option<Box<Text>>,
     pub image: Option<Box<Image>>,
     pub tooltip: Option<Box<Tooltip>>,
@@ -67,6 +68,12 @@ pub(crate) struct LNode {
     pub scroll_max: Vec2,
 }
 
+struct StateStyle {
+    base: Appearance,
+    callback: StyleCallback,
+    previous: Option<InteractionState>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct Reflow {
     pub width: Option<f32>,
@@ -76,6 +83,10 @@ pub(crate) struct Reflow {
 }
 
 impl LNode {
+    pub fn has_state_style(&self) -> bool {
+        self.state_style.is_some()
+    }
+
     #[inline]
     fn sizing(&self, a: Axis) -> Sizing {
         match a {
@@ -111,8 +122,13 @@ fn convert(node: Node, parent: u32, key: u64) -> (LNode, Vec<Node>) {
     let Node {
         id, width, height, direction, child_align_x, child_align_y, child_gap, mut padding, corner_radius,
         aspect_ratio, clip, key_context, focusable, appearance, text, image, tooltip, scroll, floating,
-        spring, handlers, children,
+        spring, handlers, children, style_callback,
     } = node;
+    let state_style = style_callback.map(|callback| Box::new(StateStyle {
+        base: appearance.as_deref().cloned().unwrap_or_default(),
+        callback,
+        previous: None,
+    }));
 
     let mut clip = clip;
     if let Some(s) = &scroll {
@@ -164,6 +180,7 @@ fn convert(node: Node, parent: u32, key: u64) -> (LNode, Vec<Node>) {
         interactive: false,
         handlers,
         appearance,
+        state_style,
         text,
         image,
         tooltip,
@@ -212,6 +229,22 @@ impl Arena {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
+
+    pub fn update_state_styles(&mut self, hovered: impl Fn(u64) -> bool, focused: Option<u64>, pressed: Option<u64>) {
+        for node in &mut self.nodes {
+            let Some(style) = &mut node.state_style else { continue };
+            let state = InteractionState {
+                hovered: hovered(node.key),
+                focused: focused == Some(node.key),
+                pressed: pressed == Some(node.key),
+            };
+            if style.previous != Some(state) {
+                let appearance = (style.callback)(style.base.clone(), state);
+                **node.appearance.get_or_insert_with(Default::default) = appearance;
+                style.previous = Some(state);
+            }
+        }
+    }
 }
 
 impl LNode {
@@ -224,8 +257,10 @@ impl LNode {
             || h.key_down.is_some()
             || h.file_drop.is_some()
             || h.file_drop_action.is_some()
+            || h.drag_source.is_some()
             || !h.actions.is_empty()
             || self.focusable
+            || self.state_style.is_some()
             || self.tooltip.is_some()
             || self.scroll.is_some()
     }
