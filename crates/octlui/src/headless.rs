@@ -5,7 +5,7 @@ use crate::image::ImageStore;
 use crate::layout::LayoutEnv;
 use crate::node::Node;
 use crate::render::{GpuContext, GpuError, Renderer};
-use crate::text::{NativeTextMeasurer, TextMeasurer};
+use crate::text::{NativeTextMeasurer, ShapedText, TextMeasurer};
 use crate::ui::Ui;
 
 /// Rendered pixels, RGBA8, row-major, straight (non-premultiplied) alpha.
@@ -84,13 +84,21 @@ impl HeadlessRenderer {
         self.gpu.adapter.get_info().name
     }
 
+    /// Enables the Unicode shaping backend for layout and drawing.
+    pub fn enable_text_shaping(&mut self) {
+        let text = ShapedText::new(Default::default(), Default::default());
+        self.renderer.set_shaped_text(text.clone());
+        self.measurer = Box::new(text);
+        self.ui.invalidate_layout();
+    }
+
     pub fn set_root(&mut self, node: Node) {
         self.ui.set_root(node);
     }
     /// Advances animations by `dt` seconds and re-lays out. Returns `true` while animating.
     pub fn frame(&mut self, dt: f32) -> bool {
         let mut env = LayoutEnv { text: &mut *self.measurer, images: &mut self.images };
-        self.ui.frame(dt, &mut env)
+        self.ui.frame(dt, dt, &mut env).0
     }
 
     /// Renders the current frame and reads it back.

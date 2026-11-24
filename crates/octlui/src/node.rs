@@ -8,7 +8,10 @@ use crate::geometry::{CornerRadius, Fill, Padding};
 use crate::id::Id;
 use crate::style::{Align, Clip, Direction, Sizing};
 use std::any::TypeId;
+use std::rc::Rc;
 use std::sync::Arc;
+
+type FileDropAction = Rc<dyn Fn(&FileDropEvent) -> Box<dyn Action>>;
 
 #[derive(Clone, Default)]
 pub(crate) struct Handlers {
@@ -17,6 +20,7 @@ pub(crate) struct Handlers {
     pub hover: Option<ErasedFn>,
     pub key_down: Option<ErasedFn>,
     pub file_drop: Option<ErasedFn>,
+    pub file_drop_action: Option<FileDropAction>,
     pub actions: Vec<(TypeId, ErasedFn)>,
     /// Dispatched (through the action system) when the node is clicked with the left button.
     pub click_action: Option<Box<dyn Action>>,
@@ -180,6 +184,15 @@ impl Node {
     #[must_use]
     pub fn on_file_drop(mut self, l: Listener<FileDropEvent>) -> Self {
         self.handlers.file_drop = Some(l.f);
+        self
+    }
+    /// Maps dropped files to an action routed from this node up to the root.
+    #[must_use]
+    pub fn on_file_drop_action<A: Action>(
+        mut self,
+        map: impl Fn(&FileDropEvent) -> A + 'static,
+    ) -> Self {
+        self.handlers.file_drop_action = Some(Rc::new(move |event| Box::new(map(event))));
         self
     }
     /// Handles action `A` dispatched at or below this node.

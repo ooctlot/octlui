@@ -386,6 +386,45 @@ impl Fill {
             _ => None,
         }
     }
+
+    /// Interpolates gradient stops and direction. A change between linear and radial
+    /// collapses to a solid at the midpoint before expanding into the new gradient.
+    pub(crate) fn interpolate(self, to: Self, t: f32) -> Self {
+        if t <= 0. {
+            return self;
+        }
+        if t >= 1. {
+            return to;
+        }
+        match (self, to) {
+            (Self::Solid(a), Self::Solid(b)) => Self::Solid(a.lerp(b, t)),
+            (Self::Linear { angle: a, stops: from }, Self::Linear { angle: b, stops: to }) => {
+                let angle = a + ((b - a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI) * t;
+                Self::Linear { angle, stops: interpolate_stops(from, to, t) }
+            }
+            (Self::Radial { stops: a }, Self::Radial { stops: b }) => {
+                Self::Radial { stops: interpolate_stops(a, b, t) }
+            }
+            (Self::Solid(c), Self::Linear { angle, stops }) => Self::Linear {
+                angle,
+                stops: interpolate_stops(solid_stops(c, stops), stops, t),
+            },
+            (Self::Solid(c), Self::Radial { stops }) => Self::Radial {
+                stops: interpolate_stops(solid_stops(c, stops), stops, t),
+            },
+            (_, Self::Solid(_)) => to.interpolate(self, 1. - t),
+            (Self::Linear { stops: a, .. } | Self::Radial { stops: a },
+             Self::Linear { stops: b, .. } | Self::Radial { stops: b }) => {
+                let midpoint = Self::Solid(sample_stops(a, 0.5).lerp(sample_stops(b, 0.5), 0.5));
+                if t < 0.5 {
+                    self.interpolate(midpoint, 2. * t)
+                } else {
+                    midpoint.interpolate(to, 2. * t - 1.)
+                }
+            }
+        }
+    }
     pub fn mul_alpha(&self, k: f32) -> Fill {
         let mut f = *self;
         match &mut f {
@@ -399,6 +438,46 @@ impl Fill {
         }
         f
     }
+}
+
+fn solid_stops(color: Color, mut stops: Stops) -> Stops {
+    if stops.is_empty() {
+        return Stops::new(&[ColorStop { offset: 0., color }]);
+    }
+    let len = stops.len();
+    for stop in &mut stops.items[..len] {
+        stop.color = color;
+    }
+    stops
+}
+
+fn interpolate_stops(a: Stops, b: Stops, t: f32) -> Stops {
+    let len = a.len().max(b.len()).max(1);
+    let last = |stops: &Stops, i: usize| {
+        let items = stops.as_slice();
+        items.get(i).or_else(|| items.last()).copied().unwrap_or_default()
+    };
+    let mut stops = [ColorStop::default(); MAX_GRADIENT_STOPS];
+    for (i, stop) in stops[..len].iter_mut().enumerate() {
+        let (a, b) = (last(&a, i), last(&b, i));
+        *stop = ColorStop {
+            offset: a.offset + (b.offset - a.offset) * t,
+            color: a.color.lerp(b.color, t),
+        };
+    }
+    Stops::new(&stops[..len])
+}
+
+fn sample_stops(stops: Stops, t: f32) -> Color {
+    let stops = stops.as_slice();
+    let mut color = stops.first().map_or(Color::TRANSPARENT, |s| s.color);
+    for pair in stops.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if t > a.offset {
+            color = a.color.lerp(b.color, ((t - a.offset) / (b.offset - a.offset).max(0.00001)).clamp(0., 1.));
+        }
+    }
+    color
 }
 fn even_stops(colors: &[Color]) -> Stops {
     let n = colors.len().min(MAX_GRADIENT_STOPS);

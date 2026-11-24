@@ -248,6 +248,10 @@ impl Renderer {
         self.native.fonts = fonts;
     }
 
+    pub(crate) fn set_shaped_text(&mut self, text: crate::text::ShapedText) {
+        self.native.set_shaped(text);
+    }
+
     /// Installs a text renderer (see [`TextRenderer`]).
     pub fn set_text_renderer(&mut self, t: Box<dyn TextRenderer>) {
         self.text = Some(t);
@@ -332,6 +336,10 @@ impl Renderer {
         let Some((data, version)) = store.get(id) else { return false };
         if self.images.get(&id.0).is_some_and(|g| g.version == version) {
             return true;
+        }
+        let max = gpu.device.limits().max_texture_dimension_2d;
+        if data.width == 0 || data.height == 0 || data.width > max || data.height > max {
+            return false;
         }
         let img = Self::upload_texture(gpu, &self.texture_layout, &self.sampler, data.width, data.height, &data.rgba, version);
         self.images.insert(id.0, img);

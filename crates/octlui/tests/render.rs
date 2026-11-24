@@ -131,6 +131,21 @@ fn cached_native_glyphs_draw_inside_text_clip() {
 }
 
 #[test]
+fn shaped_glyphs_draw_inside_text_clip_and_reuse_atlas() {
+    let Some(mut r) = renderer(136, 44) else { return };
+    r.enable_text_shaping();
+    let shot = r.render(
+        node().size(90., 44.).text(
+            components::Text::new("אבג Hello 🌈").size(25.).color(0xffffff)
+                .wrap(TextWrap::Clip { ellipsis: false }),
+        ),
+    );
+    assert!((0..44).any(|y| (0..90).any(|x| shot.pixel(x, y)[0] > 128)));
+    assert!((0..44).all(|y| (90..136).all(|x| shot.pixel(x, y)[0] == 0)));
+    assert_eq!(shot.rgba, r.read_pixels().rgba);
+}
+
+#[test]
 fn zero_width_fraction_has_no_antialiasing_fringe() {
     let Some(mut r) = renderer(401, 40) else { return };
     let track = || node().size(fixed(400.5), fixed(24.0)).background(0x313244).clip(Clip::X);

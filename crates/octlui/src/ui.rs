@@ -2,14 +2,14 @@
 //! Everything here is testable without winit or a GPU.
 
 use crate::action::{Action, Key, Keymap, Keystroke};
-use crate::anim::SpringState;
+use crate::anim::{PaintSpring, SpringState};
 use crate::components::SpringProps;
 use crate::ctx::ErasedFn;
 use crate::events::*;
-use crate::geometry::{Color, Fill, Rect, Vec2};
+use crate::geometry::{CornerRadius, Padding, Rect, Vec2};
 use crate::id::{Id, KeyMap};
 use crate::image::ImageStore;
-use crate::layout::{Arena, LayoutEnv, NONE, layout};
+use crate::layout::{Arena, LayoutEnv, NONE, Reflow, layout, position, resolve_sizes};
 use crate::node::Node;
 use crate::paint::Painter;
 use crate::render::RenderList;
@@ -40,20 +40,31 @@ pub(crate) struct BarHit {
 pub(crate) struct Visual {
     pub delta: Vec2,
     pub size: Option<Vec2>,
-    pub bg: Option<Color>,
-    pub border: Option<Color>,
-    pub tint: Option<Color>,
-    pub text: Option<Color>,
+    pub corners: Option<CornerRadius>,
+    pub border_width: Option<f32>,
 }
 
 pub(crate) struct SpringSet {
     pos: SpringState<2>,
     size: SpringState<2>,
-    bg: SpringState<4>,
-    border: SpringState<4>,
-    tint: SpringState<4>,
-    text: SpringState<4>,
+    corners: Option<SpringState<4>>,
+    border_width: Option<SpringState<1>>,
+    floating_offset: Option<SpringState<2>>,
+    pub paints: PaintSprings,
     pub visual: Visual,
+}
+
+#[derive(Default)]
+pub(crate) struct PaintSprings {
+    pub background: Option<Box<PaintSpring>>,
+    pub border: Option<Box<PaintSpring>>,
+    pub tint: Option<Box<PaintSpring>>,
+    pub text: Option<Box<PaintSpring>>,
+}
+
+struct ReflowSpring {
+    target: [f32; 7],
+    motion: SpringState<7>,
 }
 
 #[derive(Default)]
@@ -66,6 +77,7 @@ pub(crate) struct NodeState {
     pub bar_alpha: f32,
     bar_hold: f32,
     pub spring: Option<SpringSet>,
+    reflow: Option<Box<ReflowSpring>>,
 }
 
 struct HoverEntry {
@@ -105,7 +117,7 @@ pub(crate) struct Env<'a> {
     pub cx: &'a mut dyn Any,
 }
 impl Env<'_> {
-    fn call(&mut self, f: &ErasedFn, ev: &dyn Any) {
+    fn call(&mut self, f: &ErasedFn, ev: &dyn Any) -> bool {
         f(&mut *self.state, &mut *self.cx, ev)
     }
 }
@@ -121,6 +133,8 @@ pub(crate) struct Ui {
     bars: Vec<BarHit>,
     scroll_nodes: Vec<u32>,
     spring_nodes: Vec<u32>,
+    reflow_nodes: Vec<u32>,
+    reflow_active: bool,
     mouse: Option<Vec2>,
     hover: Vec<HoverEntry>,
     tooltip: TooltipState,
@@ -129,6 +143,7 @@ pub(crate) struct Ui {
     pub focus: Option<u64>,
     pub mods: crate::action::Modifiers,
     layout_dirty: bool,
+    position_dirty: bool,
     /// Actions nobody on the focus path handled; the window routes them to global handlers.
     pub unhandled: Vec<Box<dyn Action>>,
 }
@@ -157,6 +172,8 @@ impl Ui {
             bars: Vec::new(),
             scroll_nodes: Vec::new(),
             spring_nodes: Vec::new(),
+            reflow_nodes: Vec::new(),
+            reflow_active: false,
             mouse: None,
             hover: Vec::new(),
             tooltip: TooltipState::default(),
@@ -165,6 +182,7 @@ impl Ui {
             focus: None,
             mods: Default::default(),
             layout_dirty: true,
+            position_dirty: false,
             unhandled: Vec::new(),
         }
     }
@@ -184,7 +202,8 @@ impl Ui {
         let frame = self.frame_no;
         self.scroll_nodes.clear();
         self.spring_nodes.clear();
-        let Ui { arena, states, scroll_nodes, spring_nodes, .. } = self;
+        self.reflow_nodes.clear();
+        let Ui { arena, states, scroll_nodes, spring_nodes, reflow_nodes, .. } = self;
         for (i, n) in arena.nodes.iter_mut().enumerate() {
             if n.scroll.is_none() && n.spring.is_none() {
                 continue;
@@ -209,16 +228,27 @@ impl Ui {
             if n.spring.is_some() {
                 spring_nodes.push(i as u32);
             }
+            if n.spring.as_ref().is_some_and(|s| s.properties.intersects(SpringProps::LAYOUT)) {
+                reflow_nodes.push(i as u32);
+            } else {
+                st.reflow = None;
+            }
         }
         if frame % 300 == 0 {
             self.states.retain(|_, s| s.seen + 300 >= frame);
         }
         self.tooltip.live = false;
+        self.tooltip.content = None;
         self.layout_dirty = true;
     }
 
     pub fn has_root(&self) -> bool {
         !self.arena.is_empty()
+    }
+
+    pub fn invalidate_layout(&mut self) {
+        self.layout_dirty = true;
+        self.tooltip.live = false;
     }
 
     pub fn hover_keys(&self) -> Vec<u64> {
@@ -235,23 +265,85 @@ impl Ui {
 
     // ------------------------------------------------------------------ frame
 
-    /// Advances animations, lays out if needed and paints. Returns `true` while something is
-    /// still animating (the caller should keep redrawing).
-    pub fn frame(&mut self, dt: f32, env: &mut LayoutEnv) -> bool {
+    /// Advances animations, lays out if needed and paints. Returns whether animation is
+    /// ongoing and whether hit geometry moved.
+    pub fn frame(&mut self, dt: f32, elapsed: f32, env: &mut LayoutEnv) -> (bool, bool) {
         if !self.has_root() {
             self.list.clear();
-            return false;
+            return (false, false);
+        }
+        let layout_dirty = std::mem::take(&mut self.layout_dirty);
+        if layout_dirty {
+            for &i in &self.reflow_nodes {
+                self.arena.nodes[i as usize].reflow = None;
+            }
+            resolve_sizes(&mut self.arena, self.size, env);
+        }
+        let reflow = (layout_dirty || self.reflow_active) && self.tick_reflow(layout_dirty, dt);
+        if reflow {
+            resolve_sizes(&mut self.arena, self.size, env);
+        }
+        if layout_dirty || reflow {
+            position(&mut self.arena);
+            self.sync_after_layout();
+            self.position_dirty = false;
         }
         let mut animating = self.tick_scroll(dt);
-        if self.layout_dirty {
-            layout(&mut self.arena, self.size, env);
-            self.sync_after_layout();
-            self.layout_dirty = false;
+        let moved = std::mem::take(&mut self.position_dirty);
+        if moved {
+            position(&mut self.arena);
         }
-        animating |= self.update_springs(dt);
-        animating |= self.tick_tooltip(dt, env);
+        let (springs, visual_geometry) = self.update_springs(dt);
+        animating |= springs | self.reflow_active;
+        animating |= self.tick_tooltip(dt, elapsed, env);
         self.paint(env.images);
-        animating
+        (animating, layout_dirty || reflow || moved || visual_geometry)
+    }
+
+    fn tick_reflow(&mut self, retarget: bool, dt: f32) -> bool {
+        let mut changed = false;
+        self.reflow_active = false;
+        for &i in &self.reflow_nodes {
+            let n = &mut self.arena.nodes[i as usize];
+            let spec = n.spring.as_ref().unwrap();
+            let props = spec.properties;
+            let st = self.states.get_mut(&n.key).unwrap();
+            let Padding { left, top, right, bottom } = n.pad;
+            let target = [n.size.x, n.size.y, left, top, right, bottom, n.gap];
+            let spring = st.reflow.get_or_insert_with(|| Box::new(ReflowSpring {
+                target,
+                motion: SpringState::at(target),
+            }));
+            if retarget {
+                spring.target = target;
+                for (k, prop) in [
+                    SpringProps::WIDTH, SpringProps::HEIGHT, SpringProps::PADDING,
+                    SpringProps::PADDING, SpringProps::PADDING, SpringProps::PADDING, SpringProps::CHILD_GAP,
+                ].into_iter().enumerate() {
+                    if !props.contains(prop) {
+                        spring.motion.x[k] = target[k];
+                        spring.motion.v[k] = 0.;
+                    }
+                }
+            }
+            self.reflow_active |= spring.motion.step(spring.target, &spec.params(), dt);
+            let [w, h, l, t, r, b, gap] = spring.motion.x;
+            let value = (spring.motion.x != spring.target).then_some(Reflow {
+                width: props.contains(SpringProps::WIDTH).then_some(w.max(0.)),
+                height: props.contains(SpringProps::HEIGHT).then_some(h.max(0.)),
+                padding: Padding::new(l, t, r, b),
+                gap,
+            });
+            if n.reflow.as_deref() != value.as_ref() {
+                match (value, n.reflow.as_mut()) {
+                    (Some(value), Some(current)) => **current = value,
+                    (Some(value), None) => n.reflow = Some(Box::new(value)),
+                    (None, _) => n.reflow = None,
+                }
+                changed = true;
+            }
+        }
+        changed
     }
 
     fn sync_after_layout(&mut self) {
@@ -283,7 +375,7 @@ impl Ui {
             }
             if st.current != n.scroll_offset {
                 n.scroll_offset = st.current;
-                self.layout_dirty = true;
+                self.position_dirty = true;
             }
             if st.current != st.target {
                 moving = true;
@@ -307,8 +399,9 @@ impl Ui {
         moving
     }
 
-    fn update_springs(&mut self, dt: f32) -> bool {
+    fn update_springs(&mut self, dt: f32) -> (bool, bool) {
         let mut moving = false;
+        let mut geometry_changed = false;
         for &i in &self.spring_nodes {
             let n = &self.arena.nodes[i as usize];
             let spec = n.spring.as_ref().expect("spring node");
@@ -318,19 +411,13 @@ impl Ui {
 
             let pos_t = [n.rect.x, n.rect.y];
             let size_t = [n.rect.w, n.rect.h];
-            let solid = |f: Option<Fill>| f.and_then(|f| f.as_solid()).map(Color::to_array);
-            let bg_t = solid(n.appearance.as_ref().map(|a| a.background));
-            let border_t = solid(n.appearance.as_ref().map(|a| a.border_color));
-            let tint_t = solid(n.image.as_ref().map(|a| a.tint));
-            let text_t = solid(n.text.as_ref().map(|a| a.color));
-
             let sp = st.spring.get_or_insert_with(|| SpringSet {
                 pos: SpringState::at(pos_t),
                 size: SpringState::at(size_t),
-                bg: SpringState::at(bg_t.unwrap_or_default()),
-                border: SpringState::at(border_t.unwrap_or_default()),
-                tint: SpringState::at(tint_t.unwrap_or_default()),
-                text: SpringState::at(text_t.unwrap_or_default()),
+                corners: None,
+                border_width: None,
+                floating_offset: None,
+                paints: Default::default(),
                 visual: Visual::default(),
             });
 
@@ -348,32 +435,65 @@ impl Ui {
             } else {
                 sp.size = SpringState::at(size_t);
             }
-            macro_rules! color {
-                ($flag:ident, $state:ident, $target:ident, $field:ident) => {
-                    match ($target, props.contains(SpringProps::$flag)) {
-                        (Some(t), true) => {
-                            m |= sp.$state.step(t, &params, dt);
-                            v.$field = Some(Color::from_array(sp.$state.x));
-                        }
-                        (Some(t), false) => sp.$state = SpringState::at(t),
-                        _ => {}
-                    }
-                };
+            if props.contains(SpringProps::CORNER_RADIUS) {
+                let CornerRadius { top_left, top_right, bottom_right, bottom_left } = n.corner;
+                let target = [top_left, top_right, bottom_right, bottom_left];
+                let spring = sp.corners.get_or_insert_with(|| SpringState::at(target));
+                m |= spring.step(target, &params, dt);
+                v.corners = Some(spring.x.map(|r| r.max(0.)).into());
+            } else {
+                sp.corners = None;
             }
-            color!(BACKGROUND, bg, bg_t, bg);
-            color!(BORDER, border, border_t, border);
-            color!(TINT, tint, tint_t, tint);
-            color!(TEXT_COLOR, text, text_t, text);
+            if props.contains(SpringProps::BORDER_WIDTH) && let Some(a) = &n.appearance {
+                let target = [a.border_width];
+                let spring = sp.border_width.get_or_insert_with(|| SpringState::at(target));
+                m |= spring.step(target, &params, dt);
+                v.border_width = Some(spring.x[0].max(0.));
+            } else {
+                sp.border_width = None;
+            }
+            if props.contains(SpringProps::FLOATING_OFFSET) && n.is_floating && let Some(f) = &n.floating {
+                let target = [f.offset.x, f.offset.y];
+                let spring = sp.floating_offset.get_or_insert_with(|| SpringState::at(target));
+                m |= spring.step(target, &params, dt);
+                v.delta += Vec2::from(spring.x) - f.offset;
+            } else {
+                sp.floating_offset = None;
+            }
+            let targets = [
+                (&mut sp.paints.background, SpringProps::BACKGROUND, n.appearance.as_ref().map(|a| a.background)),
+                (&mut sp.paints.border, SpringProps::BORDER, n.appearance.as_ref().map(|a| a.border_color)),
+                (&mut sp.paints.tint, SpringProps::TINT, n.image.as_ref().map(|i| i.tint)),
+                (&mut sp.paints.text, SpringProps::TEXT_COLOR, n.text.as_ref().map(|t| t.color)),
+            ];
+            for (slot, property, target) in targets {
+                if let Some(target) = target.filter(|_| props.contains(property)) {
+                    let spring = slot.get_or_insert_with(|| Box::new(PaintSpring::at(target)));
+                    m |= spring.step(target, &params, dt);
+                } else {
+                    *slot = None;
+                }
+            }
+            geometry_changed |= sp.visual.delta != v.delta || sp.visual.size != v.size;
             sp.visual = v;
             moving |= m;
         }
-        moving
+        (moving, geometry_changed)
     }
 
-    fn tick_tooltip(&mut self, dt: f32, env: &mut LayoutEnv) -> bool {
+    pub fn tooltip_wait(&self) -> Option<Duration> {
+        let t = &self.tooltip;
+        if t.target.is_some() && t.target == t.owner && t.hover_time < t.delay {
+            Duration::try_from_secs_f32(t.delay - t.hover_time).ok()
+        } else {
+            None
+        }
+    }
+
+    fn tick_tooltip(&mut self, dt: f32, elapsed: f32, env: &mut LayoutEnv) -> bool {
         let t = &mut self.tooltip;
         match (t.target, t.owner) {
-            (Some(a), Some(b)) if a == b => t.hover_time += dt,
+            (Some(a), Some(b)) if a == b => t.hover_time += elapsed,
             (Some(a), _) => {
                 t.owner = Some(a);
                 t.hover_time = 0.0;
@@ -413,7 +533,7 @@ impl Ui {
             }
         }
         if t.hover_time < t.delay {
-            return true;
+            return false;
         }
         if !t.live {
             if let Some(content) = t.content.clone() {
@@ -474,8 +594,11 @@ impl Ui {
         }
         let Some(p) = self.mouse else { return false };
         if self.drag.is_some() {
-            self.drag_to(p);
-            return true;
+            if pos.is_some() {
+                self.drag_to(p);
+                return true;
+            }
+            return false;
         }
         let mut new = Vec::new();
         let mut tip = None;
@@ -535,13 +658,16 @@ impl Ui {
         let travel = (d.track_len - d.thumb_len).max(0.0001);
         let frac = ((p.get(d.axis) - d.grab - d.track_start) / travel).clamp(0.0, 1.0);
         if let Some(st) = self.states.get_mut(&d.key) {
-            st.target.set(d.axis, frac * d.max);
-            st.current.set(d.axis, frac * d.max);
+            let offset = frac * d.max;
+            st.target.set(d.axis, offset);
             st.bar_hold = 0.8;
-            self.layout_dirty = true;
             // Reflect immediately so the next layout uses it.
-            if let Some(n) = self.arena.nodes.iter_mut().find(|n| n.key == d.key) {
-                n.scroll_offset = st.current;
+            if st.current.get(d.axis) != offset {
+                st.current.set(d.axis, offset);
+                self.position_dirty = true;
+                if let Some(n) = self.arena.nodes.iter_mut().find(|n| n.key == d.key) {
+                    n.scroll_offset = st.current;
+                }
             }
         }
     }
@@ -615,69 +741,89 @@ impl Ui {
 
     /// Scroll wheel / track pad. `delta` is in logical pixels, positive = scroll up/left
     /// (content moves down/right). Returns `true` if a scroll container consumed it.
-    pub fn wheel(&mut self, delta: Vec2) -> bool {
+    pub fn wheel(&mut self, mut delta: Vec2) -> bool {
         let Some(p) = self.mouse else { return false };
         let mut cur = self.hit_test(p);
+        let mut consumed = false;
         while let Some(i) = cur {
             let n = &self.arena.nodes[i];
-            if let Some(s) = &n.scroll {
-                if s.wheel {
-                    let (mut dx, mut dy) = (delta.x, delta.y);
-                    if dx == 0.0 && (self.mods.shift() || !s.axes.y()) && s.axes.x() {
-                        dx = dy;
-                        dy = 0.0;
+            if let Some(s) = &n.scroll
+                && s.wheel
+                && let Some(st) = self.states.get_mut(&n.key)
+            {
+                let before = st.target;
+                let remap = delta.x == 0.0 && (self.mods.shift() || !s.axes.y()) && s.axes.x();
+                if s.axes.x() {
+                    let dx = if remap { delta.y } else { delta.x };
+                    st.target.x = (before.x - dx).clamp(0.0, st.max.x);
+                }
+                if s.axes.y() && !remap {
+                    st.target.y = (before.y - delta.y).clamp(0.0, st.max.y);
+                }
+                if st.target != before {
+                    let used = before - st.target;
+                    if remap {
+                        delta.y -= used.x;
+                    } else {
+                        delta -= used;
                     }
-                    if let Some(st) = self.states.get_mut(&n.key) {
-                        let mut moved = false;
-                        if s.axes.y() && dy != 0.0 {
-                            let v = (st.target.y - dy).clamp(0.0, st.max.y);
-                            moved |= v != st.target.y;
-                            st.target.y = v;
-                        }
-                        if s.axes.x() && dx != 0.0 {
-                            let v = (st.target.x - dx).clamp(0.0, st.max.x);
-                            moved |= v != st.target.x;
-                            st.target.x = v;
-                        }
-                        if moved {
-                            st.bar_hold = 0.8;
-                            if !s.smooth {
-                                st.current = st.target;
-                                self.layout_dirty = true;
-                            }
-                            return true;
-                        }
+                    st.bar_hold = 0.8;
+                    consumed = true;
+                    if delta == Vec2::ZERO {
+                        break;
                     }
                 }
             }
             cur = self.parent(i);
         }
-        false
+        consumed
     }
 
-    pub fn file_drop(&mut self, paths: Vec<std::path::PathBuf>, pos: Vec2, env: &mut Env) {
+    pub fn drop_target(&self, pos: Vec2) -> Option<u64> {
         let mut cur = self.hit_test(pos);
         while let Some(i) = cur {
-            if let Some(f) = self.arena.nodes[i].handlers.file_drop.clone() {
-                env.call(&f, &FileDropEvent { paths, position: pos });
-                return;
+            let n = &self.arena.nodes[i];
+            if n.handlers.file_drop.is_some() || n.handlers.file_drop_action.is_some() {
+                return Some(n.key);
             }
             cur = self.parent(i);
+        }
+        None
+    }
+
+    pub fn file_drop(&mut self, target: u64, event: FileDropEvent, env: &mut Env) {
+        let Some(i) = self.arena.nodes.iter().position(|n| n.key == target) else { return };
+        let h = &self.arena.nodes[i].handlers;
+        if let Some(f) = &h.file_drop {
+            env.call(f, &event);
+        }
+        if let Some(map) = &h.file_drop_action {
+            let action = map(&event);
+            if !self.dispatch_from(Some(i), &*action, env) {
+                self.unhandled.push(action);
+            }
         }
     }
 
     /// Delivers `action` to the innermost node (from the focus, else the root) that handles it.
     pub fn dispatch_action(&mut self, a: &dyn Action, env: &mut Env) -> bool {
+        let origin = self.focus_idx().or(if self.has_root() { Some(0) } else { None });
+        self.dispatch_from(origin, a, env)
+    }
+
+    fn dispatch_from(&self, mut cur: Option<usize>, a: &dyn Action, env: &mut Env) -> bool {
         let tid = a.type_id_of();
-        let mut cur = self.focus_idx().or(if self.has_root() { Some(0) } else { None });
+        let mut handled = false;
         while let Some(i) = cur {
             if let Some((_, f)) = self.arena.nodes[i].handlers.actions.iter().find(|(t, _)| *t == tid) {
-                env.call(f, a.as_any());
-                return true;
+                handled = true;
+                if !env.call(f, a.as_any()) {
+                    break;
+                }
             }
             cur = self.parent(i);
         }
-        false
+        handled
     }
 
     /// Key press: resolve key bindings against the context stack of the focus path; if none
@@ -731,7 +877,7 @@ mod tests {
     use crate::action::{KeyBinding, Modifiers};
     use crate::components::*;
     use crate::ctx::Context;
-    use crate::geometry::{Anchor, Fill};
+    use crate::geometry::{Anchor, Color, Fill};
     use crate::node::node;
     use crate::render::DrawOp;
     use crate::style::*;
@@ -790,7 +936,7 @@ mod tests {
         }
         fn frame(&mut self, dt: f32) -> bool {
             let mut tm = PlaceholderMeasurer;
-            self.ui.frame(dt, &mut LayoutEnv { text: &mut tm, images: &mut self.images })
+            self.ui.frame(dt, dt, &mut LayoutEnv { text: &mut tm, images: &mut self.images }).0
         }
         fn env(&mut self) -> (&mut Ui, Env<'_>) {
             (&mut self.ui, Env { state: &mut self.state, cx: &mut self.cx })
@@ -910,9 +1056,35 @@ mod tests {
             node().size(grow(), grow()).child(node().size(fixed(100.0), fixed(100.0)).on_file_drop(cx.listener(dropped)))
         });
         let (ui, mut env) = h.env();
-        ui.file_drop(vec!["a.png".into(), "b.png".into()], Vec2::new(10.0, 10.0), &mut env);
-        ui.file_drop(vec!["c.png".into()], Vec2::new(300.0, 10.0), &mut env);
+        let position = Vec2::new(10.0, 10.0);
+        let target = ui.drop_target(position).unwrap();
+        ui.file_drop(target, FileDropEvent {
+            paths: vec!["a.png".into(), "b.png".into()],
+            position,
+        }, &mut env);
+        assert_eq!(ui.drop_target(Vec2::new(300.0, 10.0)), None);
         assert_eq!(h.state.dropped, 2);
+    }
+
+    #[test]
+    fn file_drop_action_routes_from_the_drop_target_and_can_propagate() {
+        let mut h = Harness::new(|cx| {
+            node().fill_parent().on_action(cx.listener(change))
+                .child(node().size(100., 100.)
+                    .on_file_drop_action(|event| Change { amount: event.paths.len() as i32 })
+                    .on_action(cx.listener(|state: &mut State, cx: &mut Context<State>, a: &Change| {
+                        state.value += a.amount * 10;
+                        cx.propagate_action();
+                    })))
+                .child(node().id("other").size(100., 100.).focusable(true))
+        });
+        h.ui.set_focus(Some(&Id::new("other")));
+        let (ui, mut env) = h.env();
+        let position = Vec2::new(10., 10.);
+        let target = ui.drop_target(position).unwrap();
+        ui.file_drop(target, FileDropEvent { paths: vec!["a.png".into()], position }, &mut env);
+        assert_eq!(h.state.value, 11);
+        assert!(h.ui.unhandled.is_empty());
     }
 
     fn scroller(bar: bool, smooth: bool) -> Node {
@@ -929,6 +1101,23 @@ mod tests {
     }
 
     #[test]
+    fn grow_scroll_viewport_shrinks_below_its_list_and_reaches_the_last_item() {
+        let mut h = Harness::new(|_| {
+            node().column().size(220., 100.)
+                .child(node().height(25.))
+                .child(node().id("sidebar").column().fill_parent()
+                    .scroll(Scroll::scroll().smooth(false))
+                    .children((0..12).map(|i| node().height(20.).text(format!("Page {i}")))))
+        });
+        assert_eq!(h.ui.arena.nodes[2].rect.h, 75.);
+        h.mv(10., 50.);
+        assert!(h.ui.wheel(Vec2::new(0., -1000.)));
+        h.frame(0.016);
+        assert_eq!(h.ui.arena.nodes[2].scroll_offset.y, 165.);
+        assert_eq!(h.ui.arena.nodes.last().unwrap().rect.bottom(), 100.);
+    }
+
+    #[test]
     fn wheel_scrolls_and_clamps() {
         let mut h = Harness::new(|_| scroller(false, false));
         h.mv(10.0, 10.0);
@@ -942,6 +1131,37 @@ mod tests {
         // Content is clipped to the viewport.
         let quad = h.ui.list.ops.iter().find_map(|o| if let DrawOp::Quad(q) = o { Some(q) } else { None }).unwrap();
         assert_eq!((quad.clip[1], quad.clip[3]), (0.0, 100.0)); // clipped on Y only
+    }
+
+    #[test]
+    fn nested_scroll_uses_only_the_available_delta_and_skips_size_measurement() {
+        struct NoMeasure;
+        impl crate::text::TextMeasurer for NoMeasure {
+            fn measure(&mut self, _: &Text, _: Option<f32>) -> Vec2 {
+                panic!("wheel input must reuse resolved sizes");
+            }
+            fn min_content_width(&mut self, _: &Text) -> f32 {
+                panic!("wheel input must reuse resolved sizes");
+            }
+        }
+        let mut h = Harness::new(|_| {
+            let scroll = Scroll::scroll().smooth(false);
+            node().column().size(200., 100.).scroll(scroll.clone())
+                .child(node().column().size(200., 50.)
+                    .scroll(scroll.offset(Vec2::new(0., 5.)))
+                    .child(node().size(200., 70.).text("Inner")))
+                .child(node().size(200., 200.).text("Outer"))
+        });
+        assert_eq!(h.ui.arena.nodes[1].scroll_offset.y, 5.);
+        h.mv(10., 10.);
+        assert!(h.ui.wheel(Vec2::new(0., -40.)));
+        let (moving, geometry_changed) = h.ui.frame(0.016, 0.016, &mut LayoutEnv {
+            text: &mut NoMeasure,
+            images: &mut h.images,
+        });
+        assert!(!moving && geometry_changed);
+        assert_eq!(h.ui.arena.nodes[1].scroll_offset.y, 20.);
+        assert_eq!(h.ui.arena.nodes[0].scroll_offset.y, 25.);
     }
 
     #[test]
@@ -1005,6 +1225,29 @@ mod tests {
     }
 
     #[test]
+    fn reflow_spring_moves_siblings_and_preserves_hit_geometry() {
+        let view = |width, cx: &Context<State>| {
+            node().row().fill_parent()
+                .child(node().id("resize").size(width, 40.).spring(Spring::new(SpringProps::WIDTH)))
+                .child(node().size(35., 40.).on_click(cx.listener(clicked)))
+        };
+        let mut h = Harness::new(|cx| view(40., cx));
+        h.ui.set_root(view(140., &h.cx));
+        assert!(h.frame(0.016));
+        let edge = h.ui.arena.nodes[1].rect.right();
+        assert!(edge > 40. && edge < 140.);
+        assert_eq!(h.ui.arena.nodes[2].rect.x, edge);
+        h.click(edge + 5., 20.);
+        assert_eq!(h.state.clicks, 1);
+        for _ in 0..240 {
+            if !h.frame(0.016) {
+                break;
+            }
+        }
+        assert_eq!(h.ui.arena.nodes[2].rect.x, 140.);
+    }
+
+    #[test]
     fn tooltip_appears_after_delay_and_fades() {
         let mut h = Harness::new(|_| {
             node().size(grow(), grow()).child(
@@ -1018,7 +1261,8 @@ mod tests {
         });
         h.mv(10.0, 10.0);
         let base = h.ui.list.ops.len();
-        h.frame(0.1);
+        assert!(!h.frame(0.1));
+        assert!(h.ui.tooltip_wait().is_some());
         assert_eq!(h.ui.list.ops.len(), base, "not yet visible");
         h.frame(0.25);
         h.frame(0.05);
@@ -1079,7 +1323,7 @@ mod tests {
         for fit in [ImageFit::Contain, ImageFit::Cover, ImageFit::Fill, ImageFit::None] {
             ui.set_root(node().size(fixed(100.0), fixed(100.0)).image(Image::new(id).fit(fit)));
             let mut tm = PlaceholderMeasurer;
-            ui.frame(0.016, &mut LayoutEnv { text: &mut tm, images: &mut store });
+            ui.frame(0.016, 0.016, &mut LayoutEnv { text: &mut tm, images: &mut store });
             let DrawOp::Image(_, q) = ui.list.ops.last().unwrap().clone() else { panic!() };
             quads.push(q);
         }

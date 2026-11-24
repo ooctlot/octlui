@@ -10,7 +10,8 @@ pub trait Event: Any + Clone {}
 /// A user-defined command, declared with `#[octlui::action]`.
 ///
 /// Actions are bound to keys with [`KeyBinding`] and dispatched along the focus path
-/// (innermost node to root) until a node with a matching `on_action` handler is found.
+/// (innermost node to root). A matching `on_action` handler may continue to its ancestors
+/// with [`crate::Context::propagate_action`].
 pub trait Action: Any + fmt::Debug {
     /// Fully qualified name (module path + type name).
     fn name(&self) -> &'static str;

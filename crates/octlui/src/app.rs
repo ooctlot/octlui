@@ -3,25 +3,27 @@
 use crate::action::{Action, Event, Key, Keymap, KeyBinding, Modifiers};
 use crate::components::FontId;
 use crate::ctx::{Context, Effect, WindowInfo};
-use crate::events::MouseButton;
+use crate::events::{FileDropEvent, MouseButton};
 use crate::geometry::{Color, Vec2};
-use crate::image::ImageStore;
+use crate::image::{ImageId, ImageStore};
 use crate::layout::LayoutEnv;
 use crate::node::Node;
 use crate::render::{GpuContext, Renderer, TextRenderer};
-use crate::text::{FontLoadingError, Fonts, NativeTextMeasurer, SystemFontError, TextMeasurer};
+use crate::text::{FontLoadingError, Fonts, NativeTextMeasurer, ShapedText, SystemFontError, TextMeasurer};
 use font_kit::{family_name::FamilyName, font::Font, properties::Properties, source::SystemSource};
 use crate::ui::{Env, Ui};
 use std::any::{Any, TypeId};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::{fmt, io};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
-use winit::data_transfer::TypeHint;
+use winit::data_transfer::{DataTransferId, TypeHint};
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, DndAction, EventLoop};
+use winit::event_loop::{ActiveEventLoop, AsyncRequestSerial, ControlFlow, DndAction, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window as WinitWindow, WindowAttributes, WindowId};
 
@@ -63,6 +65,7 @@ impl Default for WindowOptions {
 type GlobalHandler = Rc<dyn Fn(&dyn Any, &mut AppContext)>;
 type TextMeasurerFactory = Box<dyn Fn() -> Box<dyn TextMeasurer>>;
 type TextRendererFactory = Box<dyn Fn() -> Box<dyn TextRenderer>>;
+type View<S> = Box<dyn FnMut(&mut S, &mut Context<S>) -> Node>;
 
 /// Application-wide state handed to the `run` closure and to global action handlers.
 pub struct AppContext {
@@ -74,7 +77,9 @@ pub struct AppContext {
     measurer: Option<TextMeasurerFactory>,
     fonts: Fonts,
     default_font: FontId,
+    shape_text: bool,
     text_renderer: Option<TextRendererFactory>,
+    proxy: Option<EventLoopProxy>,
 }
 
 impl AppContext {
@@ -88,7 +93,9 @@ impl AppContext {
             measurer: None,
             fonts: Fonts::default(),
             default_font: FontId::DEFAULT,
+            shape_text: false,
             text_renderer: None,
+            proxy: None,
         }
     }
 
@@ -116,10 +123,35 @@ impl AppContext {
         &mut self.images
     }
 
+    /// Registers PNG or JPEG bytes for background decoding on first use.
+    pub fn register_image(&mut self, bytes: impl Into<Vec<u8>>) -> io::Result<ImageId> {
+        let bytes = bytes.into();
+        self.register_image_supplier(move || Ok(bytes))
+    }
+
+    /// Registers a one-shot PNG or JPEG source. Both loading and decoding run off the UI
+    /// thread. The image is empty until decoding succeeds. A failed source stays empty.
+    pub fn register_image_supplier(
+        &mut self,
+        source: impl FnOnce() -> io::Result<Vec<u8>> + Send + 'static,
+    ) -> io::Result<ImageId> {
+        let proxy = self.proxy.clone().ok_or_else(|| io::Error::other("no running event loop"))?;
+        self.images.register_encoded(Box::new(source), proxy)
+    }
+
     /// Loads the first face of a TrueType (.ttf) or OpenType (.otf) file.
     /// Use the returned ID with `Text::font` or `set_default_font`.
     pub fn load_font(&mut self, path: impl AsRef<Path>) -> Result<FontId, FontLoadingError> {
         Font::from_path(path, 0).map(|font| self.fonts.insert(font))
+    }
+
+    /// Loads a face by index from in-memory TrueType or OpenType font data.
+    pub fn load_font_bytes(
+        &mut self,
+        bytes: impl Into<Arc<Vec<u8>>>,
+        index: u32,
+    ) -> Result<FontId, FontLoadingError> {
+        Font::from_bytes(bytes.into(), index).map(|font| self.fonts.insert(font))
     }
 
     /// Loads an installed face by PostScript name, or the regular face of a named family.
@@ -136,6 +168,12 @@ impl AppContext {
     /// Pass `FontId::DEFAULT` to restore the system sans-serif face.
     pub fn set_default_font(&mut self, font: FontId) {
         self.default_font = font;
+    }
+
+    /// Enables Unicode shaping, bidirectional layout and font fallback in new windows.
+    /// Custom text measurers and renderers keep taking precedence when installed.
+    pub fn enable_text_shaping(&mut self) {
+        self.shape_text = true;
     }
 
     /// Replaces the text measurer used by new windows (real text shaping plugs in here).
@@ -157,7 +195,7 @@ impl AppContext {
         &mut self,
         options: WindowOptions,
         state: S,
-        view: impl Fn(&mut S, &mut Context<S>) -> Node + 'static,
+        view: impl FnMut(&mut S, &mut Context<S>) -> Node + 'static,
     ) {
         self.pending.push(Box::new(WindowSpec { options, state, view: Box::new(view) }));
     }
@@ -187,12 +225,21 @@ trait UiWindow {
     fn id(&self) -> WindowId;
     /// Returns `false` when the window wants to close.
     fn event(&mut self, app: &mut AppContext, el: &dyn ActiveEventLoop, ev: WindowEvent) -> bool;
+    fn images_changed(&mut self);
+    fn wake_at(&mut self, now: Instant) -> Option<Instant>;
 }
 
 struct WindowSpec<S> {
     options: WindowOptions,
     state: S,
-    view: Box<dyn Fn(&mut S, &mut Context<S>) -> Node>,
+    view: View<S>,
+}
+
+struct FileTransfer {
+    serial: Option<AsyncRequestSerial>,
+    position: Option<Vec2>,
+    drop: Option<(u64, Vec2)>,
+    paths: Option<Vec<PathBuf>>,
 }
 
 struct Window<S> {
@@ -204,13 +251,14 @@ struct Window<S> {
     ui: Ui,
     state: S,
     cx: Context<S>,
-    view: Box<dyn Fn(&mut S, &mut Context<S>) -> Node>,
+    view: View<S>,
     measurer: Box<dyn TextMeasurer>,
     clear: Color,
     dirty: bool,
     last_frame: Instant,
-    drag_pos: Vec2,
-    drag_paths: Vec<PathBuf>,
+    redraw_at: Option<Instant>,
+    transfers: HashMap<DataTransferId, FileTransfer>,
+    closed: bool,
 }
 
 impl<S: 'static> PendingWindow for WindowSpec<S> {
@@ -261,6 +309,10 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
 
         let mut renderer = Renderer::new(&gpu_ctx, config.format);
         renderer.set_native_fonts(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font));
+        let shaped = app.shape_text.then(|| ShapedText::new(app.fonts.clone(), app.default_font));
+        if let Some(text) = &shaped {
+            renderer.set_shaped_text(text.clone());
+        }
         if let Some(factory) = &app.text_renderer { renderer.set_text_renderer(factory()); }
 
         let mut ui = Ui::new();
@@ -282,13 +334,17 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
             view: self.view,
             measurer: match &app.measurer {
                 Some(factory) => factory(),
-                None => Box::new(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font)),
+                None => match shaped {
+                    Some(text) => Box::new(text),
+                    None => Box::new(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font)),
+                },
             },
             clear: self.options.clear_color,
             dirty: true,
             last_frame: Instant::now(),
-            drag_pos: Vec2::ZERO,
-            drag_paths: Vec::new(),
+            redraw_at: None,
+            transfers: HashMap::new(),
+            closed: false,
         }))
     }
 }
@@ -331,36 +387,13 @@ fn map_button(b: winit::event::MouseButton) -> MouseButton {
     }
 }
 
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() + 0 && i + 2 <= b.len() - 1 {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 /// Converts a `file://` URI into a path.
 pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    let rest = uri.strip_prefix("file://")?;
-    // Drop an optional authority ("localhost").
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    let decoded = percent_decode(rest);
-    // "/C:/dir" on Windows.
-    let bytes = decoded.as_bytes();
-    if bytes.len() > 2 && bytes[0] == b'/' && bytes[2] == b':' && bytes[1].is_ascii_alphabetic() {
-        return Some(PathBuf::from(&decoded[1..]));
+    let url = url::Url::parse(uri).ok()?;
+    if url.scheme() != "file" {
+        return None;
     }
-    Some(PathBuf::from(decoded))
+    url.to_file_path().ok()
 }
 
 impl<S: 'static> Window<S> {
@@ -388,6 +421,7 @@ impl<S: 'static> Window<S> {
                 match e {
                     Effect::Notify => self.dirty = true,
                     Effect::Quit => app.quit = true,
+                    Effect::CloseWindow => self.closed = true,
                     Effect::Focus(id) => {
                         self.ui.set_focus(Some(&id));
                         self.dirty = true;
@@ -420,6 +454,31 @@ impl<S: 'static> Window<S> {
         Vec2::new((p.x / s) as f32, (p.y / s) as f32)
     }
 
+    fn drag_position(&mut self, el: &dyn ActiveEventLoop, id: DataTransferId, position: Option<Vec2>) {
+        if let Some(transfer) = self.transfers.get_mut(&id)
+            && transfer.drop.is_none()
+        {
+            transfer.position = position;
+        }
+        let accepts = self.transfers.get(&id).and_then(|t| t.position)
+            .and_then(|p| self.ui.drop_target(p)).is_some();
+        let actions: &[DndAction] = if accepts { &[DndAction::Copy] } else { &[] };
+        let _ = el.set_valid_dnd_actions(id, actions);
+    }
+
+    fn finish_drop(&mut self, app: &mut AppContext, id: DataTransferId) {
+        let Some(transfer) = self.transfers.get_mut(&id) else { return };
+        let Some((target, position)) = transfer.drop else { return };
+        let Some(paths) = transfer.paths.take() else { return };
+        self.transfers.remove(&id);
+        if !paths.is_empty() {
+            self.sync_info();
+            let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+            self.ui.file_drop(target, FileDropEvent { paths, position }, &mut env);
+            self.pump(app);
+        }
+    }
+
     fn resize(&mut self) {
         let size = self.win.surface_size();
         if size.width == 0 || size.height == 0 {
@@ -438,7 +497,8 @@ impl<S: 'static> Window<S> {
             return;
         }
         let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32().min(0.05);
+        let elapsed = (now - self.last_frame).as_secs_f32();
+        let dt = elapsed.min(0.05);
         self.last_frame = now;
 
         let mut rebuilt = false;
@@ -451,16 +511,18 @@ impl<S: 'static> Window<S> {
             self.pump(app);
         }
 
-        let animating = {
+        let (animating, geometry_changed) = {
             let mut lenv = LayoutEnv { text: &mut *self.measurer, images: &mut app.images };
-            self.ui.frame(dt, &mut lenv)
+            self.ui.frame(dt, elapsed, &mut lenv)
         };
 
         // Re-evaluate hover against the fresh layout (content may have moved under the pointer).
-        if rebuilt || animating {
+        if rebuilt || geometry_changed {
             self.sync_info();
             let mut env = Env { state: &mut self.state, cx: &mut self.cx };
-            self.ui.pointer_moved(None, &mut env);
+            if self.ui.pointer_moved(None, &mut env) {
+                self.win.request_redraw();
+            }
             self.pump(app);
         }
 
@@ -486,6 +548,7 @@ impl<S: 'static> Window<S> {
             _ => {}
         }
 
+        self.redraw_at = self.ui.tooltip_wait().and_then(|wait| now.checked_add(wait));
         if animating || self.dirty {
             self.win.request_redraw();
         }
@@ -495,6 +558,21 @@ impl<S: 'static> Window<S> {
 impl<S: 'static> UiWindow for Window<S> {
     fn id(&self) -> WindowId {
         self.win.id()
+    }
+
+    fn images_changed(&mut self) {
+        self.ui.invalidate_layout();
+        self.win.request_redraw();
+    }
+
+    fn wake_at(&mut self, now: Instant) -> Option<Instant> {
+        let deadline = self.redraw_at?;
+        if deadline <= now {
+            self.redraw_at = None;
+            self.win.request_redraw();
+            return None;
+        }
+        Some(deadline)
     }
 
     fn event(&mut self, app: &mut AppContext, el: &dyn ActiveEventLoop, ev: WindowEvent) -> bool {
@@ -582,41 +660,43 @@ impl<S: 'static> UiWindow for Window<S> {
 
             // ---- file drag & drop ----
             WindowEvent::DragEntered { id, position } => {
-                if let Some(p) = position {
-                    self.drag_pos = self.logical(p);
+                if el.data_transfer(id).is_ok_and(|t| t.has_type(&TypeHint::UriList)) {
+                    let serial = el.fetch_data_transfer(id, &TypeHint::UriList).ok();
+                    self.transfers.insert(id, FileTransfer {
+                        serial, position: None, drop: None, paths: None,
+                    });
                 }
-                self.drag_paths.clear();
-                let wants = el.data_transfer(id).map(|t| t.has_type(&TypeHint::UriList)).unwrap_or(false);
-                if wants {
-                    let _ = el.set_valid_dnd_actions(id, &[DndAction::Copy]);
-                    let _ = el.fetch_data_transfer(id, &TypeHint::UriList);
-                } else {
-                    let _ = el.set_valid_dnd_actions(id, &[]);
+                self.drag_position(el, id, position.map(|p| self.logical(p)));
+            }
+            WindowEvent::DragPosition { id, position, .. } => {
+                self.drag_position(el, id, Some(self.logical(position)));
+            }
+            WindowEvent::DataTransferReceived { id, serial, value } => {
+                if let Some(transfer) = self.transfers.get_mut(&id)
+                    && transfer.serial == Some(serial)
+                {
+                    transfer.paths = Some(value.try_as_uris().ok().into_iter().flatten()
+                        .filter_map(|uri| uri_to_path(&uri)).collect());
+                    self.finish_drop(app, id);
                 }
             }
-            WindowEvent::DragPosition { position, .. } => self.drag_pos = self.logical(position),
-            WindowEvent::DataTransferReceived { value, .. } => {
-                if matches!(value.type_().hint(), Some(TypeHint::UriList)) {
-                    if let Ok(uris) = value.try_as_uris() {
-                        self.drag_paths = uris.iter().filter_map(|u| uri_to_path(u)).collect();
+            WindowEvent::DragDropped { id, .. } => {
+                if let Some(transfer) = self.transfers.get_mut(&id) {
+                    transfer.drop = transfer.position.and_then(|p| self.ui.drop_target(p).map(|key| (key, p)));
+                    if transfer.drop.is_some() && transfer.serial.is_none() {
+                        transfer.serial = el.fetch_data_transfer(id, &TypeHint::UriList).ok();
+                    }
+                    if transfer.drop.is_some() && transfer.serial.is_some() {
+                        self.finish_drop(app, id);
+                    } else {
+                        self.transfers.remove(&id);
                     }
                 }
             }
-            WindowEvent::DragDropped { .. } => {
-                let paths = std::mem::take(&mut self.drag_paths);
-                if !paths.is_empty() {
-                    self.sync_info();
-                    {
-                        let mut env = Env { state: &mut self.state, cx: &mut self.cx };
-                        self.ui.file_drop(paths, self.drag_pos, &mut env);
-                    }
-                    self.pump(app);
-                }
-            }
-            WindowEvent::DragLeft { .. } => self.drag_paths.clear(),
+            WindowEvent::DragLeft { id } => { self.transfers.remove(&id); }
             _ => {}
         }
-        true
+        !self.closed
     }
 }
 
@@ -627,7 +707,7 @@ struct Runner {
     app: AppContext,
     gpu: Option<Rc<GpuContext>>,
     windows: HashMap<WindowId, Box<dyn UiWindow>>,
-    failed: bool,
+    error: Rc<RefCell<Option<RunError>>>,
 }
 
 impl Runner {
@@ -639,8 +719,7 @@ impl Runner {
                     self.windows.insert(w.id(), w);
                 }
                 Err(e) => {
-                    eprintln!("octlui: failed to open window: {e}");
-                    self.failed = true;
+                    self.error.borrow_mut().get_or_insert(RunError::Window(e));
                 }
             }
         }
@@ -653,7 +732,7 @@ impl ApplicationHandler for Runner {
             init(&mut self.app);
         }
         self.open_pending(el);
-        if self.windows.is_empty() {
+        if self.app.quit || self.windows.is_empty() {
             el.exit();
         }
     }
@@ -667,8 +746,47 @@ impl ApplicationHandler for Runner {
             self.windows.remove(&id);
         }
         self.open_pending(el);
-        if self.app.quit || self.windows.is_empty() || self.failed && self.windows.is_empty() {
+        if self.app.quit || self.windows.is_empty() {
             el.exit();
+        }
+    }
+
+    fn proxy_wake_up(&mut self, _: &dyn ActiveEventLoop) {
+        if self.app.images.resolve_decoded() {
+            for window in self.windows.values_mut() {
+                window.images_changed();
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, el: &dyn ActiveEventLoop) {
+        let now = Instant::now();
+        let next = self.windows.values_mut().filter_map(|window| window.wake_at(now)).min();
+        el.set_control_flow(next.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+    }
+}
+
+/// An error starting the event loop or creating a window.
+#[derive(Debug)]
+pub enum RunError {
+    EventLoop(winit::error::EventLoopError),
+    Window(Box<dyn std::error::Error>),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EventLoop(error) => write!(f, "window event loop: {error}"),
+            Self::Window(error) => write!(f, "could not open window: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EventLoop(error) => Some(error),
+            Self::Window(error) => Some(error.as_ref()),
         }
     }
 }
@@ -694,23 +812,26 @@ impl Application {
     /// Runs the event loop. `init` is called once the platform is ready; open windows and
     /// register key bindings there. Returns when the last window closes or the app quits.
     pub fn run(self, init: impl FnOnce(&mut AppContext) + 'static) {
-        let event_loop = match EventLoop::new() {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("octlui: failed to create the event loop: {e}");
-                return;
-            }
-        };
+        if let Err(error) = self.try_run(init) {
+            eprintln!("octlui: {error}");
+        }
+    }
+
+    /// Runs the event loop and returns any startup or window creation error to the caller.
+    pub fn try_run(self, init: impl FnOnce(&mut AppContext) + 'static) -> Result<(), RunError> {
+        let event_loop = EventLoop::new().map_err(RunError::EventLoop)?;
+        let error = Rc::new(RefCell::new(None));
+        let mut app = AppContext::new();
+        app.proxy = Some(event_loop.create_proxy());
         let runner = Runner {
             init: Some(Box::new(init)),
-            app: AppContext::new(),
+            app,
             gpu: None,
             windows: HashMap::new(),
-            failed: false,
+            error: error.clone(),
         };
-        if let Err(e) = event_loop.run_app(runner) {
-            eprintln!("octlui: event loop error: {e}");
-        }
+        event_loop.run_app(runner).map_err(RunError::EventLoop)?;
+        error.borrow_mut().take().map_or(Ok(()), Err)
     }
 }
 
@@ -741,8 +862,10 @@ mod tests {
 
     #[test]
     fn uris() {
-        assert_eq!(uri_to_path("file:///home/a%20b/c.png"), Some(PathBuf::from("/home/a b/c.png")));
-        assert_eq!(uri_to_path("file:///C:/x/y.txt"), Some(PathBuf::from("C:/x/y.txt")));
+        #[cfg(unix)]
+        assert_eq!(uri_to_path("file://localhost/home/a%20b/c.png"), Some(PathBuf::from("/home/a b/c.png")));
+        #[cfg(windows)]
+        assert_eq!(uri_to_path("file://localhost/C:/a%20b/y.txt"), Some(PathBuf::from(r"C:\a b\y.txt")));
         assert_eq!(uri_to_path("http://x"), None);
     }
 }

@@ -45,7 +45,24 @@ fn main() {
 }
 ```
 
-Run the examples with `cargo run --example counter` and `cargo run --example showcase`.
+## Examples
+
+```sh
+cargo run -p octlui-examples
+cargo run -p octlui --example counter
+cargo run -p octlui --example showcase
+```
+
+The examples crate opens a feature gallery and an independent counter window. Scroll the
+sidebar or drag its thumb to browse pages. Press Esc to close the focused window.
+Text shaping, wrapping, fonts and alignment have separate pages, as do floating overlays,
+tooltips, image loading, image fit and image tint. The Motion section has a page for each
+spring property.
+
+To add a gallery page, put a Rust file in `crates/octlui-examples/src/features` with
+`CATEGORY`, `TITLE`, and `view(state: &mut Gallery, cx: &mut Cx) -> Node`. The build script
+uses its filename as the page ID. Set `OCTLUI_EXAMPLES_FONT` to a local font file to use it in
+the text demo.
 
 ## Concepts
 
@@ -56,12 +73,17 @@ called, and animations/scrolling run without it.
 **Listeners.** `cx.listener(f)` turns `fn(&mut S, &mut Context<S>, &E)` *or*
 `fn(&mut S, &mut Context<S>, E)` into a handler; `E` is inferred. Node handlers: `on_click`,
 `on_mouse_down`, `on_hover`, `on_key_down`, `on_file_drop`, `on_action`, plus
-`on_click_action(action)`. `Context` also offers `dispatch`, `focus`, `blur`, `set_title`,
-`quit`, `is_hovered`, `is_focused`.
+`on_click_action(action)` and `on_file_drop_action(map)`. `Context` also offers `dispatch`,
+`focus`, `blur`, `set_title`, `close_window`, `quit`, `is_hovered`, and `is_focused`.
 
 **Actions.** `#[octlui::action]` on a struct/enum (adds `Clone + Debug` if missing). Actions
 dispatch from the focused node (or the root) up to the root; the first node with a matching
-`on_action` handles it. Unhandled actions go to `acx.on_action::<A>(..)` global handlers.
+`on_action` handles it. Call `cx.propagate_action()` in a handler to continue up the tree.
+Mapped file-drop actions start at the drop target. Unhandled actions go to
+`acx.on_action::<A>(..)` global handlers.
+
+**Application errors.** Use `application().try_run(setup)` to receive an event-loop or
+window-creation error.
 
 **Key bindings.** `KeyBinding::new(Key::S.with(Modifiers::primary()), Save, Some("editor && !readonly"))`.
 Contexts are the `key_context` names along the focus path; deeper matches win, later bindings
@@ -86,9 +108,13 @@ Optional components (each boxed, so plain nodes stay small):
 | `Text` | content, color (gradient ok), size, font, alignment, wrap: `None / Letters / Words / NewLines / Clip { ellipsis } / Fade { length }` |
 | `Image` | `ImageId` source, tint (gradient ok), fit `Contain / Cover / Fill / None`; drawn above the background, below text |
 | `Tooltip` | a `Node` shown after a hover delay, with fade in/out |
-| `Scroll` | child offset, smooth scrolling, wheel/track pad, optional `ScrollBar` (radius, colors, reserve space, side, always-visible or fading, thickness, draggable thumb) |
+| `Scroll` | child offset, smooth scrolling, wheel/track pad with unused deltas passed to ancestor scroll views, optional `ScrollBar` with a draggable thumb |
 | `Floating` | lifts the node out of the flow, attached to its parent via two anchors + offset, optional clip to parent, z-index |
-| `Spring` | chosen properties (`POSITION`, `SIZE`, `BACKGROUND`, `BORDER`, `TINT`, `TEXT_COLOR`) lag behind declared values; stiffness/damping/mass/precision |
+| `Spring` | animate position, visual size, paint, border width, corner radius, or floating offset. Use `WIDTH`, `HEIGHT`, `PADDING`, or `CHILD_GAP` to animate layout |
+
+Combine spring properties with `|`. `SpringProps::LAYOUT` selects all four reflow
+properties. Paint springs interpolate solid colors and gradient stops, and they resume from
+the visible fill when retargeted. A linear-to-radial transition passes through a solid color.
 
 ### Builder macros
 
@@ -123,14 +149,15 @@ view() -> Node tree
 ```
 
 * Layout passes are plain loops over a contiguous arena (reverse = bottom-up, forward =
-  top-down); no recursion, no per-node allocation.
+  top-down). Scroll-only frames update positions without remeasuring text or sizes.
 * One shader draws everything: SDF rounded rectangles with per-corner radii, anti-aliased
   borders, gradient fills (storage buffer), image sampling with tint, and a **per-instance clip
   rect** (so clipping never breaks batches). Consecutive solid quads are a single draw call.
 * Retained per-node state (scroll offsets, springs, fades, tooltip timers) is keyed by `Id`
   (or by tree position when no id is given). Give list items stable ids.
-* Springs are visual only: `POSITION` translates the node's whole subtree, `SIZE` changes the
-  node's own background/border/image; layout and hit-testing of children use declared values.
+* `POSITION` translates the whole subtree. `SIZE` changes the node's own visual bounds.
+  Layout springs update geometry and hit regions as children and siblings reflow.
+* Waiting for a tooltip uses a timer. Rendering resumes when its fade begins.
 * Coordinates are logical pixels; the renderer applies the window scale factor. Colors are
   sRGB values blended in gamma space (a non-sRGB surface format is preferred).
 * `headless::HeadlessRenderer` renders to RGBA offscreen for screenshot tests.
@@ -140,7 +167,8 @@ view() -> Node tree
 Windowed and headless renderers use the system sans-serif font by default. Use
 `components::FontId::SERIF` or `MONOSPACE` to select another system family.
 In the application setup callback, load a local font or look up an installed font
-by family or PostScript name. Pass the returned ID to `Text::font` to select it for
+by family or PostScript name. Use `load_font_bytes(bytes, face_index)` for in-memory font data.
+Pass the returned ID to `Text::font` to select it for
 one node, or set the default before opening a window:
 
 ```rust,ignore
@@ -155,15 +183,19 @@ The renderer rasterizes glyphs at the window's physical scale through DirectWrit
 on Windows, Core Graphics on macOS, and FreeType on Linux. Coverage masks stay in
 GPU atlas pages across frames. Consecutive glyphs on one page share an instanced draw.
 
-The built-in layout maps individual Unicode characters to glyphs. Complex-script
-shaping, bidirectional layout, and fallback across font families require a custom
-`TextMeasurer` and `TextRenderer`. Install them with `AppContext::set_text_measurer`
-and `AppContext::set_text_renderer`.
+Call `acx.enable_text_shaping()` before opening a window to enable complex-script shaping,
+bidirectional layout, system font fallback, and color emoji where suitable fonts are installed.
+The shaping backend caches layout by text and width and uses the same instanced glyph atlas
+renderer. Headless rendering exposes the same opt-in method. Custom integrations can use
+`AppContext::set_text_measurer` and `AppContext::set_text_renderer`.
 
 ## Images
 
-`acx.images().insert_rgba(w, h, pixels)` returns an `ImageId`; or register an
-`ImageSupplier` that loads by id on demand. octlui contains no image decoders.
+`acx.images().insert_rgba(w, h, pixels)` inserts raw pixels. To decode PNG or JPEG on demand,
+call `acx.register_image(bytes)` or `acx.register_image_supplier(|| std::fs::read(path))`.
+The supplier and decoder run on a worker. Once pixels arrive, the runtime requests layout and
+redraw, including for images whose dimensions determine their size. A synchronous
+`ImageSupplier` remains available for raw pixels loaded by ID.
 
 ## Platform notes
 
