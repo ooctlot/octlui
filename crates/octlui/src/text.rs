@@ -1,9 +1,11 @@
 //! Text measurement and line layout.
 
 mod native;
+mod shaped;
 pub use font_kit::error::FontLoadingError;
 pub use native::NativeTextMeasurer;
 pub(crate) use native::Fonts;
+pub(crate) use shaped::ShapedText;
 
 /// Failure to find or open an installed font.
 #[derive(Debug)]

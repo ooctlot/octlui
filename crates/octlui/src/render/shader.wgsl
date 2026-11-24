@@ -114,16 +114,20 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         || in.world.x > in.clip.x + in.clip.z || in.world.y > in.clip.y + in.clip.w) {
         discard;
     }
-    // Glyph instances use an R8 coverage atlas and the text run's gradient coordinates.
+    // Glyph instances use coverage or color atlas pages and the run's gradient coordinates.
     if (in.extra.x < 0.0) {
         let rel = (in.world - in.rect.xy) / in.rect.zw;
         if (any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0))) { discard; }
-        let coverage = textureSampleLevel(tex, samp, mix(in.uv.xy, in.uv.zw, rel), 0.0).r;
+        let glyph = textureSampleLevel(tex, samp, mix(in.uv.xy, in.uv.zw, rel), 0.0);
         var color = in.tint;
         if (in.extra.w >= 0.0) {
             color = gradient_color(u32(in.extra.w), in.world - in.fill.xy - 0.5 * in.fill.zw, in.fill.zw);
         }
-        var alpha = color.a * coverage;
+        var alpha = color.a * glyph.r;
+        if (in.extra.x < -1.5) {
+            color = vec4<f32>(glyph.rgb, color.a);
+            alpha = color.a * glyph.a;
+        }
         if (in.radii.x > 0.0) {
             alpha *= clamp((in.fill.x + in.fill.z - in.world.x) / in.radii.x, 0.0, 1.0);
         }

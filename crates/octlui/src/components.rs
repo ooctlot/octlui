@@ -232,7 +232,7 @@ impl Default for Floating {
 
 /// Set of node properties a [`Spring`] animates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SpringProps(u8);
+pub struct SpringProps(u16);
 impl SpringProps {
     pub const NONE: SpringProps = SpringProps(0);
     /// Moves the node and its whole subtree.
@@ -243,9 +243,26 @@ impl SpringProps {
     pub const BORDER: SpringProps = SpringProps(8);
     pub const TINT: SpringProps = SpringProps(16);
     pub const TEXT_COLOR: SpringProps = SpringProps(32);
+    /// Resolved width, including sibling and child reflow.
+    pub const WIDTH: SpringProps = SpringProps(1 << 6);
+    /// Resolved height, including sibling and child reflow.
+    pub const HEIGHT: SpringProps = SpringProps(1 << 7);
+    pub const PADDING: SpringProps = SpringProps(1 << 8);
+    pub const CHILD_GAP: SpringProps = SpringProps(1 << 9);
+    pub const CORNER_RADIUS: SpringProps = SpringProps(1 << 10);
+    pub const BORDER_WIDTH: SpringProps = SpringProps(1 << 11);
+    pub const FLOATING_OFFSET: SpringProps = SpringProps(1 << 12);
+    /// Animates width, height, padding and child gap with reflow.
+    pub const LAYOUT: SpringProps = SpringProps(
+        Self::WIDTH.0 | Self::HEIGHT.0 | Self::PADDING.0 | Self::CHILD_GAP.0,
+    );
+    /// Original visual spring properties, including position, size and paints.
     pub const ALL: SpringProps = SpringProps(63);
     pub const fn contains(self, o: SpringProps) -> bool {
         self.0 & o.0 == o.0 && o.0 != 0
+    }
+    pub(crate) const fn intersects(self, o: SpringProps) -> bool {
+        self.0 & o.0 != 0
     }
 }
 impl std::ops::BitOr for SpringProps {
@@ -257,8 +274,8 @@ impl std::ops::BitOr for SpringProps {
 
 /// Makes the chosen properties lag behind their declared values like a damped spring.
 ///
-/// Springs are purely visual: layout and the declared values stay exact. Only solid colors
-/// animate; gradients switch immediately.
+/// Width, height, padding and child gap can reflow layout. The other properties affect
+/// presentation. Combine properties with `|` to use the same spring parameters for them.
 #[derive(Clone, Debug, PartialEq)]
 #[octlui::builder(no_constructor)]
 pub struct Spring {

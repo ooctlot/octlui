@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/octlui", "crates/octlui-macros"]
+members = ["crates/octlui", "crates/octlui-macros", "crates/octlui-examples"]
 
 [workspace.package]
 version = "0.1.0"

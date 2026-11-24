@@ -50,6 +50,7 @@ pub(crate) struct LNode {
     pub scroll: Option<Box<Scroll>>,
     pub floating: Option<Box<Floating>>,
     pub spring: Option<Box<Spring>>,
+    pub reflow: Option<Box<Reflow>>,
 
     // ---- computed ----
     pub is_floating: bool,
@@ -65,19 +66,33 @@ pub(crate) struct LNode {
     pub scroll_max: Vec2,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct Reflow {
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    pub padding: Padding,
+    pub gap: f32,
+}
+
 impl LNode {
     #[inline]
     fn sizing(&self, a: Axis) -> Sizing {
         match a {
-            Axis::X => self.width,
-            Axis::Y => self.height,
+            Axis::X => self.reflow.as_ref().and_then(|r| r.width).map_or(self.width, fixed),
+            Axis::Y => self.reflow.as_ref().and_then(|r| r.height).map_or(self.height, fixed),
         }
+    }
+    pub fn padding(&self) -> Padding {
+        self.reflow.as_ref().map_or(self.pad, |r| r.padding)
+    }
+    fn gap(&self) -> f32 {
+        self.reflow.as_ref().map_or(self.gap, |r| r.gap)
     }
     #[inline]
     fn pad_along(&self, a: Axis) -> f32 {
         match a {
-            Axis::X => self.pad.horizontal(),
-            Axis::Y => self.pad.vertical(),
+            Axis::X => self.padding().horizontal(),
+            Axis::Y => self.padding().vertical(),
         }
     }
     #[inline]
@@ -153,6 +168,7 @@ fn convert(node: Node, parent: u32, key: u64) -> (LNode, Vec<Node>) {
         scroll,
         floating,
         spring,
+        reflow: None,
         size: Vec2::ZERO,
         min_size: Vec2::ZERO,
         rect: Rect::default(),
@@ -205,6 +221,7 @@ impl LNode {
             || h.hover.is_some()
             || h.key_down.is_some()
             || h.file_drop.is_some()
+            || h.file_drop_action.is_some()
             || !h.actions.is_empty()
             || self.focusable
             || self.tooltip.is_some()
@@ -222,11 +239,15 @@ pub(crate) fn layout(arena: &mut Arena, viewport: Vec2, env: &mut LayoutEnv) {
     if arena.is_empty() {
         return;
     }
+    resolve_sizes(arena, viewport, env);
+    position(arena);
+}
+
+pub(crate) fn resolve_sizes(arena: &mut Arena, viewport: Vec2, env: &mut LayoutEnv) {
     fit_pass(arena, Axis::X, env);
     resolve_pass(arena, Axis::X, viewport);
     fit_pass(arena, Axis::Y, env);
     resolve_pass(arena, Axis::Y, viewport);
-    position_pass(arena);
 }
 
 fn leaf_content(node: &LNode, axis: Axis, env: &mut LayoutEnv) -> Option<(f32, f32)> {
@@ -280,7 +301,7 @@ fn fit_pass(arena: &mut Arena, axis: Axis, env: &mut LayoutEnv) {
                         count += 1;
                     }
                     if main {
-                        let gaps = node.gap * count.saturating_sub(1) as f32;
+                        let gaps = node.gap() * count.saturating_sub(1) as f32;
                         (sum + gaps + pad, msum + gaps + pad)
                     } else {
                         (mx + pad, mmx + pad)
@@ -305,18 +326,20 @@ fn fit_pass(arena: &mut Arena, axis: Axis, env: &mut LayoutEnv) {
         match axis {
             // Width derived from a fixed height + aspect ratio.
             Axis::X => {
-                if let (Some(r), SizeKind::Fixed(h)) = (node.aspect, node.height.kind) {
-                    if !matches!(node.width.kind, SizeKind::Fixed(_)) {
-                        size = node.width.clamp(node.height.clamp(h) * r);
-                        min = min.min(size);
-                    }
+                let (w, h) = (node.sizing(Axis::X), node.sizing(Axis::Y));
+                if let (Some(r), SizeKind::Fixed(height)) = (node.aspect, h.kind)
+                    && !matches!(w.kind, SizeKind::Fixed(_))
+                {
+                    size = w.clamp(h.clamp(height) * r);
+                    min = min.min(size);
                 }
             }
             // Height derived from the (now final) width + aspect ratio.
             Axis::Y => {
                 if let Some(r) = node.aspect {
-                    if !matches!(node.height.kind, SizeKind::Fixed(_)) {
-                        size = node.height.clamp(node.size.x / r);
+                    let height = node.sizing(Axis::Y);
+                    if !matches!(height.kind, SizeKind::Fixed(_)) {
+                        size = height.clamp(node.size.x / r);
                         min = size;
                     }
                 }
@@ -349,7 +372,7 @@ fn resolve_pass(arena: &mut Arena, axis: Axis, viewport: Vec2) {
         let (range, dir, gap, parent_size, inner) = {
             let n = &arena.nodes[i];
             let size = n.size.get(axis);
-            (n.children(), n.direction, n.gap, size, (size - n.pad_along(axis)).max(0.0))
+            (n.children(), n.direction, n.gap(), size, (size - n.pad_along(axis)).max(0.0))
         };
         flow.clear();
         for c in range.clone() {
@@ -488,7 +511,7 @@ fn shrink_largest_first(arena: &mut Arena, axis: Axis, idx: &mut Vec<usize>, rem
     }
 }
 
-fn position_pass(arena: &mut Arena) {
+pub(crate) fn position(arena: &mut Arena) {
     {
         let r = &mut arena.nodes[0];
         r.rect = Rect::new(0.0, 0.0, r.size.x, r.size.y);
@@ -499,7 +522,7 @@ fn position_pass(arena: &mut Arena) {
             n.rect.w = n.size.x;
             n.rect.h = n.size.y;
             let axes = n.scroll.as_ref().map_or(Clip::None, |s| s.axes);
-            (n.children(), n.direction, n.gap, n.align_x, n.align_y, n.pad, n.rect, axes, n.scroll_offset)
+            (n.children(), n.direction, n.gap(), n.align_x, n.align_y, n.padding(), n.rect, axes, n.scroll_offset)
         };
         if arena.nodes[i].child_count == 0 {
             arena.nodes[i].content = Vec2::new(pad.horizontal(), pad.vertical());

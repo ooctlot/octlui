@@ -1,0 +1,9 @@
+[package]
+name = "octlui-examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+octlui = { path = "../octlui" }
+image = { version = "0.25", default-features = false, features = ["png"] }

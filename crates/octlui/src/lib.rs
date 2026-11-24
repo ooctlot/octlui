@@ -21,7 +21,7 @@ pub mod text;
 pub(crate) mod ui;
 
 pub use action::{Action, Event, Key, KeyBinding, Keymap, Keystroke, Modifiers};
-pub use app::{AppContext, Application, WindowOptions, application};
+pub use app::{AppContext, Application, RunError, WindowOptions, application};
 pub use ctx::{Context, Listener};
 pub use node::{Node, node};
 pub use octlui_macros::{action, builder, property};

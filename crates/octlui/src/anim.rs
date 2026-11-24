@@ -1,5 +1,7 @@
 //! Spring physics.
 
+use crate::geometry::Fill;
+
 /// Spring configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpringParams {
@@ -61,9 +63,55 @@ impl<const N: usize> SpringState<N> {
     }
 }
 
+pub(crate) struct PaintSpring {
+    from: Fill,
+    to: Fill,
+    progress: SpringState<1>,
+}
+
+impl PaintSpring {
+    pub fn at(fill: Fill) -> Self {
+        Self { from: fill, to: fill, progress: SpringState::at([1.]) }
+    }
+
+    pub fn value(&self) -> Fill {
+        self.from.interpolate(self.to, self.progress.x[0])
+    }
+
+    pub fn step(&mut self, target: Fill, params: &SpringParams, dt: f32) -> bool {
+        if target != self.to {
+            self.from = self.value();
+            self.to = target;
+            self.progress = SpringState::at([0.]);
+        }
+        (self.progress.x != [1.] || self.progress.v != [0.])
+            && self.progress.step([1.], params, dt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::Color;
+
+    #[test]
+    fn interrupted_paint_starts_from_its_visible_value() {
+        let mut spring = PaintSpring::at(Fill::solid(0x105040));
+        let params = SpringParams::default();
+        let linear = Fill::linear(0.4, &[Color::WHITE, Color::BLACK]);
+        assert!(spring.step(linear, &params, 0.05));
+        let intermediate = spring.value();
+        assert_ne!(intermediate, linear);
+        let radial = Fill::radial(&[Color::BLACK, Color::WHITE]);
+        assert!(spring.step(radial, &params, 0.));
+        assert_eq!(spring.value(), intermediate);
+        for _ in 0..240 {
+            if !spring.step(radial, &params, 0.016) {
+                break;
+            }
+        }
+        assert_eq!(spring.value(), radial);
+    }
     #[test]
     fn converges() {
         let mut s = SpringState::<1>::at([0.0]);

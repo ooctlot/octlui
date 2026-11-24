@@ -1,7 +1,7 @@
 //! Turns a laid-out [`Arena`] into [`RenderList`] draw ops and hit regions.
 
 use crate::components::*;
-use crate::geometry::{Color, CornerRadius, Fill, Rect, Vec2};
+use crate::geometry::{CornerRadius, Fill, Rect, Vec2};
 use crate::image::ImageStore;
 use crate::layout::Arena;
 use crate::render::{DrawOp, QuadInstance, RenderList, TextRun};
@@ -93,8 +93,9 @@ impl<'a> Painter<'a> {
         }
         let arena = self.arena;
         let n = &arena.nodes[i];
-        let vis: Option<Visual> =
-            if n.spring.is_some() { self.states.get(&n.key).and_then(|s| s.spring.as_ref()).map(|s| s.visual) } else { None };
+        let spring = if n.spring.is_some() { self.states.get(&n.key).and_then(|s| s.spring.as_ref()) } else { None };
+        let vis = spring.map(|s| s.visual);
+        let paints = spring.map(|s| &s.paints);
         let mut translate = parent_translate;
         if let Some(v) = &vis {
             translate += v.delta;
@@ -118,21 +119,14 @@ impl<'a> Painter<'a> {
             }
         }
 
-        let r = radii(n.corner, rect);
+        let r = radii(vis.and_then(|v| v.corners).unwrap_or(n.corner), rect);
 
         // ---- background + border ----
         if let Some(a) = &n.appearance {
-            let mut bg = a.background;
-            let mut bc = a.border_color;
-            if let Some(v) = &vis {
-                if let (Some(c), Fill::Solid(_)) = (v.bg, bg) {
-                    bg = Fill::Solid(c);
-                }
-                if let (Some(c), Fill::Solid(_)) = (v.border, bc) {
-                    bc = Fill::Solid(c);
-                }
-            }
-            let bw = if bc.is_visible() { a.border_width.max(0.0) } else { 0.0 };
+            let bg = paints.and_then(|p| p.background.as_ref()).map_or(a.background, |p| p.value());
+            let bc = paints.and_then(|p| p.border.as_ref()).map_or(a.border_color, |p| p.value());
+            let width = vis.and_then(|v| v.border_width).unwrap_or(a.border_width);
+            let bw = if bc.is_visible() { width.max(0.0) } else { 0.0 };
             if bg.is_visible() || bw > 0.0 {
                 self.quad(rect, clip, r, &bg, &bc, bw, alpha);
             }
@@ -140,7 +134,8 @@ impl<'a> Painter<'a> {
 
         // ---- image ----
         if let Some(img) = &n.image {
-            self.image(img, n.pad, rect, clip, r, vis.as_ref().and_then(|v| v.tint), alpha);
+            let tint = paints.and_then(|p| p.tint.as_ref()).map_or(img.tint, |p| p.value());
+            self.image(img, n.padding(), rect, clip, r, tint, alpha);
         }
 
         let mut child_clip = clip;
@@ -157,13 +152,8 @@ impl<'a> Painter<'a> {
         // ---- text ----
         if let Some(t) = &n.text {
             if !t.content.is_empty() {
-                let mut color = t.color;
-                if let (Some(v), Fill::Solid(_)) = (&vis, color) {
-                    if let Some(c) = v.text {
-                        color = Fill::Solid(c);
-                    }
-                }
-                let area = rect.shrink(n.pad);
+                let color = paints.and_then(|p| p.text.as_ref()).map_or(t.color, |p| p.value());
+                let area = rect.shrink(n.padding());
                 self.list.ops.push(DrawOp::Text(TextRun {
                     rect: area,
                     clip: match t.wrap {
@@ -205,7 +195,7 @@ impl<'a> Painter<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn image(&mut self, img: &Image, pad: crate::geometry::Padding, rect: Rect, clip: Rect, r: [f32; 4], tint_override: Option<Color>, alpha: f32) {
+    fn image(&mut self, img: &Image, pad: crate::geometry::Padding, rect: Rect, clip: Rect, r: [f32; 4], tint: Fill, alpha: f32) {
         let Some((iw, ih)) = self.images.size(img.source) else { return };
         let (iw, ih) = (iw as f32, ih as f32);
         let area = rect.shrink(pad);
@@ -232,10 +222,6 @@ impl<'a> Painter<'a> {
                 (Rect::new(area.x + (area.w - w) * 0.5, area.y + (area.h - h) * 0.5, w, h), [u0, v0, u0 + vw, v0 + vh])
             }
         };
-        let mut tint = img.tint;
-        if let (Some(c), Fill::Solid(_)) = (tint_override, tint) {
-            tint = Fill::Solid(c);
-        }
         let (tc, tg) = self.list.encode_fill(&tint.mul_alpha(alpha));
         let same = dest == area;
         self.list.ops.push(DrawOp::Image(
