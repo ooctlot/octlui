@@ -131,6 +131,8 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
         return vec4<f32>(rgb * alpha, alpha);
     }
     let size = in.rect.zw;
+    // A degenerate quad has no coverage, even within the anti-aliasing fringe.
+    if (any(size <= vec2<f32>(0.0))) { discard; }
     let local = in.world - (in.rect.xy + size * 0.5);
     let d = sd_rounded_box(local, size * 0.5, in.radii);
     let outer = clamp(0.5 - d * globals.scale, 0.0, 1.0);
