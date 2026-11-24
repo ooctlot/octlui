@@ -3,8 +3,8 @@
 mod native;
 mod shaped;
 pub use font_kit::error::FontLoadingError;
-pub use native::NativeTextMeasurer;
 pub(crate) use native::Fonts;
+pub use native::NativeTextMeasurer;
 pub(crate) use shaped::{Layout as ShapedLayout, ShapedText};
 
 /// Failure to find or open an installed font.
@@ -119,7 +119,12 @@ impl TextMeasurer for PlaceholderMeasurer {
             TextWrap::Clip { .. } | TextWrap::Fade { .. } => 0.0,
             TextWrap::Letters => gw,
             TextWrap::Words => {
-                t.content.split_whitespace().map(|w| w.chars().count()).max().unwrap_or(0) as f32 * gw
+                t.content
+                    .split_whitespace()
+                    .map(|w| w.chars().count())
+                    .max()
+                    .unwrap_or(0) as f32
+                    * gw
             }
             TextWrap::None | TextWrap::NewLines => self.measure(t, None).x,
         }

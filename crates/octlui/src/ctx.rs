@@ -17,7 +17,10 @@ pub struct Listener<E> {
 }
 impl<E> Clone for Listener<E> {
     fn clone(&self) -> Self {
-        Self { f: self.f.clone(), _p: PhantomData }
+        Self {
+            f: self.f.clone(),
+            _p: PhantomData,
+        }
     }
 }
 
@@ -81,7 +84,10 @@ impl<S: 'static> Context<S> {
     pub(crate) fn new() -> Self {
         Self {
             effects: Vec::new(),
-            info: WindowInfo { scale: 1.0, ..Default::default() },
+            info: WindowInfo {
+                scale: 1.0,
+                ..Default::default()
+            },
             propagate_action: false,
             _p: PhantomData,
         }
@@ -92,9 +98,11 @@ impl<S: 'static> Context<S> {
     /// The event type is inferred from the handler signature.
     pub fn listener<E: 'static, M, H: Handler<S, E, M>>(&self, handler: H) -> Listener<E> {
         let f: ErasedFn = Rc::new(move |state, cx, ev| {
-            if let (Some(s), Some(c), Some(e)) =
-                (state.downcast_mut::<S>(), cx.downcast_mut::<Context<S>>(), ev.downcast_ref::<E>())
-            {
+            if let (Some(s), Some(c), Some(e)) = (
+                state.downcast_mut::<S>(),
+                cx.downcast_mut::<Context<S>>(),
+                ev.downcast_ref::<E>(),
+            ) {
                 c.propagate_action = false;
                 handler.call(s, c, e);
                 return std::mem::take(&mut c.propagate_action);

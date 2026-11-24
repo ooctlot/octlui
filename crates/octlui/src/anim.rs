@@ -16,7 +16,12 @@ pub struct SpringParams {
 impl SpringParams {
     /// Critically damped spring: fastest approach without overshoot.
     pub fn critical(stiffness: f32) -> Self {
-        Self { stiffness, damping: 2.0 * stiffness.sqrt(), mass: 1.0, precision: 0.01 }
+        Self {
+            stiffness,
+            damping: 2.0 * stiffness.sqrt(),
+            mass: 1.0,
+            precision: 0.01,
+        }
     }
 }
 impl Default for SpringParams {
@@ -71,7 +76,11 @@ pub(crate) struct PaintSpring {
 
 impl PaintSpring {
     pub fn at(fill: Fill) -> Self {
-        Self { from: fill, to: fill, progress: SpringState::at([1.]) }
+        Self {
+            from: fill,
+            to: fill,
+            progress: SpringState::at([1.]),
+        }
     }
 
     pub fn value(&self) -> Fill {
@@ -84,8 +93,7 @@ impl PaintSpring {
             self.to = target;
             self.progress = SpringState::at([0.]);
         }
-        (self.progress.x != [1.] || self.progress.v != [0.])
-            && self.progress.step([1.], params, dt)
+        (self.progress.x != [1.] || self.progress.v != [0.]) && self.progress.step([1.], params, dt)
     }
 }
 

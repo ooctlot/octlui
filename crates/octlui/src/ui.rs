@@ -170,7 +170,11 @@ impl Default for Ui {
 
 fn step_to(cur: f32, target: f32, dt: f32, dur: f32) -> f32 {
     let step = dt / dur.max(1e-3);
-    if target > cur { (cur + step).min(target) } else { (cur - step).max(target) }
+    if target > cur {
+        (cur + step).min(target)
+    } else {
+        (cur - step).max(target)
+    }
 }
 
 impl Ui {
@@ -220,7 +224,10 @@ impl Ui {
         let had_focus_target = previous_focus.is_some() || self.focus_idx().is_some();
         self.arena.build(node);
         self.pressed_style = self.pressed_style.filter(|key| {
-            self.arena.nodes.iter().any(|node| node.key == *key && node.has_state_style())
+            self.arena
+                .nodes
+                .iter()
+                .any(|node| node.key == *key && node.has_state_style())
         });
         if had_focus_target && self.focus_idx().is_none() {
             self.focus_to(None);
@@ -231,9 +238,20 @@ impl Ui {
         self.scroll_nodes.clear();
         self.spring_nodes.clear();
         self.reflow_nodes.clear();
-        let Ui { arena, states, scroll_nodes, spring_nodes, reflow_nodes, input: input_state, .. } = self;
+        let Ui {
+            arena,
+            states,
+            scroll_nodes,
+            spring_nodes,
+            reflow_nodes,
+            input: input_state,
+            ..
+        } = self;
         for (i, n) in arena.nodes.iter_mut().enumerate() {
-            if n.scroll.is_none() && n.spring.is_none() && n.text.as_ref().is_none_or(|t| t.input.is_none()) {
+            if n.scroll.is_none()
+                && n.spring.is_none()
+                && n.text.as_ref().is_none_or(|t| t.input.is_none())
+            {
                 continue;
             }
             let st = states.entry(n.key).or_default();
@@ -241,7 +259,9 @@ impl Ui {
             if let Some(text) = &mut n.text
                 && let Some(input) = &text.input
             {
-                let editor = st.editor.get_or_insert_with(|| Box::new(Editor::new(text, input)));
+                let editor = st
+                    .editor
+                    .get_or_insert_with(|| Box::new(Editor::new(text, input)));
                 let revision = editor.revision;
                 editor.reconcile(text, input);
                 if editor.revision != revision {
@@ -269,7 +289,10 @@ impl Ui {
             if n.spring.is_some() {
                 spring_nodes.push(i as u32);
             }
-            if n.spring.as_ref().is_some_and(|s| s.properties.intersects(SpringProps::LAYOUT)) {
+            if n.spring
+                .as_ref()
+                .is_some_and(|s| s.properties.intersects(SpringProps::LAYOUT))
+            {
                 reflow_nodes.push(i as u32);
             } else {
                 st.reflow = None;
@@ -302,7 +325,8 @@ impl Ui {
     }
 
     fn focus_idx(&self) -> Option<usize> {
-        self.focus.and_then(|k| self.arena.nodes.iter().position(|n| n.key == k))
+        self.focus
+            .and_then(|k| self.arena.nodes.iter().position(|n| n.key == k))
     }
 
     pub fn focused_key(&self) -> Option<u64> {
@@ -323,7 +347,8 @@ impl Ui {
         }
         for (snapshot, focused) in [(previous, false), (current, true)] {
             if let Some((_, Some(listener))) = snapshot {
-                self.focus_changes.push((listener, FocusChangeEvent { focused }));
+                self.focus_changes
+                    .push((listener, FocusChangeEvent { focused }));
             }
         }
     }
@@ -375,7 +400,10 @@ impl Ui {
         animating |= self.tick_tooltip(dt, elapsed, env);
         animating |= self.tick_input(elapsed);
         self.paint(env.images);
-        (animating, layout_dirty || reflow || moved || visual_geometry)
+        (
+            animating,
+            layout_dirty || reflow || moved || visual_geometry,
+        )
     }
 
     fn tick_reflow(&mut self, retarget: bool, dt: f32) -> bool {
@@ -386,18 +414,33 @@ impl Ui {
             let spec = n.spring.as_ref().unwrap();
             let props = spec.properties;
             let st = self.states.get_mut(&n.key).unwrap();
-            let Padding { left, top, right, bottom } = n.pad;
+            let Padding {
+                left,
+                top,
+                right,
+                bottom,
+            } = n.pad;
             let target = [n.size.x, n.size.y, left, top, right, bottom, n.gap];
-            let spring = st.reflow.get_or_insert_with(|| Box::new(ReflowSpring {
-                target,
-                motion: SpringState::at(target),
-            }));
+            let spring = st.reflow.get_or_insert_with(|| {
+                Box::new(ReflowSpring {
+                    target,
+                    motion: SpringState::at(target),
+                })
+            });
             if retarget {
                 spring.target = target;
                 for (k, prop) in [
-                    SpringProps::WIDTH, SpringProps::HEIGHT, SpringProps::PADDING,
-                    SpringProps::PADDING, SpringProps::PADDING, SpringProps::PADDING, SpringProps::CHILD_GAP,
-                ].into_iter().enumerate() {
+                    SpringProps::WIDTH,
+                    SpringProps::HEIGHT,
+                    SpringProps::PADDING,
+                    SpringProps::PADDING,
+                    SpringProps::PADDING,
+                    SpringProps::PADDING,
+                    SpringProps::CHILD_GAP,
+                ]
+                .into_iter()
+                .enumerate()
+                {
                     if !props.contains(prop) {
                         spring.motion.x[k] = target[k];
                         spring.motion.v[k] = 0.;
@@ -430,7 +473,10 @@ impl Ui {
             if let Some(st) = self.states.get_mut(&n.key) {
                 st.max = n.scroll_max;
                 st.current = n.scroll_offset;
-                st.target = Vec2::new(st.target.x.clamp(0.0, st.max.x), st.target.y.clamp(0.0, st.max.y));
+                st.target = Vec2::new(
+                    st.target.x.clamp(0.0, st.max.x),
+                    st.target.y.clamp(0.0, st.max.y),
+                );
             }
         }
     }
@@ -440,8 +486,13 @@ impl Ui {
         for &i in &self.scroll_nodes {
             let n = &mut self.arena.nodes[i as usize];
             let s = n.scroll.as_ref().expect("scroll node");
-            let Some(st) = self.states.get_mut(&n.key) else { continue };
-            st.target = Vec2::new(st.target.x.clamp(0.0, st.max.x), st.target.y.clamp(0.0, st.max.y));
+            let Some(st) = self.states.get_mut(&n.key) else {
+                continue;
+            };
+            st.target = Vec2::new(
+                st.target.x.clamp(0.0, st.max.x),
+                st.target.y.clamp(0.0, st.max.y),
+            );
             if s.smooth {
                 let k = 1.0 - (-s.smooth_rate * dt).exp();
                 st.current = st.current.lerp(st.target, k);
@@ -465,7 +516,11 @@ impl Ui {
                 let want = bar.always_visible || hovered || dragging || st.bar_hold > 0.0;
                 let target = if want { 1.0 } else { 0.0 };
                 if (st.bar_alpha - target).abs() > f32::EPSILON {
-                    let dur = if target > st.bar_alpha { bar.fade_in } else { bar.fade_out };
+                    let dur = if target > st.bar_alpha {
+                        bar.fade_in
+                    } else {
+                        bar.fade_out
+                    };
                     st.bar_alpha = step_to(st.bar_alpha, target, dt, dur.as_secs_f32());
                     moving = true;
                 }
@@ -485,7 +540,9 @@ impl Ui {
             let spec = n.spring.as_ref().expect("spring node");
             let params = spec.params();
             let props = spec.properties;
-            let Some(st) = self.states.get_mut(&n.key) else { continue };
+            let Some(st) = self.states.get_mut(&n.key) else {
+                continue;
+            };
 
             let pos_t = [n.rect.x, n.rect.y];
             let size_t = [n.rect.w, n.rect.h];
@@ -514,7 +571,12 @@ impl Ui {
                 sp.size = SpringState::at(size_t);
             }
             if props.contains(SpringProps::CORNER_RADIUS) {
-                let CornerRadius { top_left, top_right, bottom_right, bottom_left } = n.corner;
+                let CornerRadius {
+                    top_left,
+                    top_right,
+                    bottom_right,
+                    bottom_left,
+                } = n.corner;
                 let target = [top_left, top_right, bottom_right, bottom_left];
                 let spring = sp.corners.get_or_insert_with(|| SpringState::at(target));
                 m |= spring.step(target, &params, dt);
@@ -522,27 +584,52 @@ impl Ui {
             } else {
                 sp.corners = None;
             }
-            if props.contains(SpringProps::BORDER_WIDTH) && let Some(a) = &n.appearance {
+            if props.contains(SpringProps::BORDER_WIDTH)
+                && let Some(a) = &n.appearance
+            {
                 let target = [a.border_width];
-                let spring = sp.border_width.get_or_insert_with(|| SpringState::at(target));
+                let spring = sp
+                    .border_width
+                    .get_or_insert_with(|| SpringState::at(target));
                 m |= spring.step(target, &params, dt);
                 v.border_width = Some(spring.x[0].max(0.));
             } else {
                 sp.border_width = None;
             }
-            if props.contains(SpringProps::FLOATING_OFFSET) && n.is_floating && let Some(f) = &n.floating {
+            if props.contains(SpringProps::FLOATING_OFFSET)
+                && n.is_floating
+                && let Some(f) = &n.floating
+            {
                 let target = [f.offset.x, f.offset.y];
-                let spring = sp.floating_offset.get_or_insert_with(|| SpringState::at(target));
+                let spring = sp
+                    .floating_offset
+                    .get_or_insert_with(|| SpringState::at(target));
                 m |= spring.step(target, &params, dt);
                 v.delta += Vec2::from(spring.x) - f.offset;
             } else {
                 sp.floating_offset = None;
             }
             let targets = [
-                (&mut sp.paints.background, SpringProps::BACKGROUND, n.appearance.as_ref().map(|a| a.background)),
-                (&mut sp.paints.border, SpringProps::BORDER, n.appearance.as_ref().map(|a| a.border_color)),
-                (&mut sp.paints.tint, SpringProps::TINT, n.image.as_ref().map(|i| i.tint)),
-                (&mut sp.paints.text, SpringProps::TEXT_COLOR, n.text.as_ref().map(|t| t.color)),
+                (
+                    &mut sp.paints.background,
+                    SpringProps::BACKGROUND,
+                    n.appearance.as_ref().map(|a| a.background),
+                ),
+                (
+                    &mut sp.paints.border,
+                    SpringProps::BORDER,
+                    n.appearance.as_ref().map(|a| a.border_color),
+                ),
+                (
+                    &mut sp.paints.tint,
+                    SpringProps::TINT,
+                    n.image.as_ref().map(|i| i.tint),
+                ),
+                (
+                    &mut sp.paints.text,
+                    SpringProps::TEXT_COLOR,
+                    n.text.as_ref().map(|t| t.color),
+                ),
             ];
             for (slot, property, target) in targets {
                 if let Some(target) = target.filter(|_| props.contains(property)) {
@@ -595,7 +682,13 @@ impl Ui {
 
         if t.content.is_none() {
             // (Re)read the owner's tooltip config; the owner may have been rebuilt.
-            match self.arena.nodes.iter().find(|n| n.key == owner).and_then(|n| n.tooltip.as_ref()) {
+            match self
+                .arena
+                .nodes
+                .iter()
+                .find(|n| n.key == owner)
+                .and_then(|n| n.tooltip.as_ref())
+            {
                 Some(cfg) => {
                     t.delay = cfg.delay.as_secs_f32();
                     t.fade_in = cfg.fade_in.as_secs_f32();
@@ -630,7 +723,18 @@ impl Ui {
         self.hits.clear();
         self.bars.clear();
         let input_focus = self.input_focus();
-        let Ui { arena, states, list, hits, bars, tooltip, size, input, input_text, .. } = self;
+        let Ui {
+            arena,
+            states,
+            list,
+            hits,
+            bars,
+            tooltip,
+            size,
+            input,
+            input_text,
+            ..
+        } = self;
         input.hits.clear();
         {
             let mut p = Painter::new(arena, states, list, images, input_text);
@@ -668,7 +772,11 @@ impl Ui {
     // ------------------------------------------------------------------ input
 
     fn hit_test(&self, p: Vec2) -> Option<usize> {
-        self.hits.iter().rev().find(|h| h.clip.contains(p) && h.rect.contains(p)).map(|h| h.idx as usize)
+        self.hits
+            .iter()
+            .rev()
+            .find(|h| h.clip.contains(p) && h.rect.contains(p))
+            .map(|h| h.idx as usize)
     }
 
     fn parent(&self, i: usize) -> Option<usize> {
@@ -698,7 +806,10 @@ impl Ui {
             if tip.is_none() && n.tooltip.is_some() {
                 tip = Some(n.key);
             }
-            new.push(HoverEntry { key: n.key, handler: n.handlers.hover.clone() });
+            new.push(HoverEntry {
+                key: n.key,
+                handler: n.handlers.hover.clone(),
+            });
             cur = self.parent(i);
         }
         for e in &self.hover {
@@ -715,7 +826,8 @@ impl Ui {
                 }
             }
         }
-        let changed = self.hover.len() != new.len() || self.hover.iter().zip(&new).any(|(a, b)| a.key != b.key);
+        let changed = self.hover.len() != new.len()
+            || self.hover.iter().zip(&new).any(|(a, b)| a.key != b.key);
         self.hover = new;
         self.tooltip.target = tip;
         changed || selecting
@@ -734,10 +846,17 @@ impl Ui {
     }
 
     pub fn drag_data(&mut self, position: Vec2) -> Option<Box<dyn DataTransferSend>> {
-        let (key, _) = self.drag_source_press.take_if(|(_, origin)| {
-            (position - *origin).length() >= DRAG_THRESHOLD
-        })?;
-        let source = self.arena.nodes.iter().find(|node| node.key == key)?.handlers.drag_source.as_ref()?;
+        let (key, _) = self
+            .drag_source_press
+            .take_if(|(_, origin)| (position - *origin).length() >= DRAG_THRESHOLD)?;
+        let source = self
+            .arena
+            .nodes
+            .iter()
+            .find(|node| node.key == key)?
+            .handlers
+            .drag_source
+            .as_ref()?;
         source()
     }
 
@@ -777,7 +896,13 @@ impl Ui {
         }
     }
 
-    pub fn pointer_button(&mut self, button: MouseButton, pressed: bool, pos: Option<Vec2>, env: &mut Env) {
+    pub fn pointer_button(
+        &mut self,
+        button: MouseButton,
+        pressed: bool,
+        pos: Option<Vec2>,
+        env: &mut Env,
+    ) {
         let left = button == MouseButton::Left;
         if left {
             self.pressed_style = None;
@@ -807,7 +932,14 @@ impl Ui {
                     let h = &self.arena.nodes[i].handlers;
                     let (click, action) = (h.click.clone(), h.click_action.clone());
                     if let Some(f) = click {
-                        env.call(&f, &ClickEvent { position: p, button, modifiers: self.mods });
+                        env.call(
+                            &f,
+                            &ClickEvent {
+                                position: p,
+                                button,
+                                modifiers: self.mods,
+                            },
+                        );
                     }
                     if let Some(a) = action {
                         if !self.dispatch_action(&*a, env) {
@@ -827,8 +959,20 @@ impl Ui {
                     Axis::X => (b.thumb.x, b.thumb.w, b.track.x, b.track.w),
                     Axis::Y => (b.thumb.y, b.thumb.h, b.track.y, b.track.h),
                 };
-                let grab = if b.thumb.contains(p) { p.get(b.axis) - start } else { len * 0.5 };
-                self.drag = Some(BarDrag { key: b.key, axis: b.axis, grab, track_start: ts, track_len: tl, thumb_len: len, max: b.max });
+                let grab = if b.thumb.contains(p) {
+                    p.get(b.axis) - start
+                } else {
+                    len * 0.5
+                };
+                self.drag = Some(BarDrag {
+                    key: b.key,
+                    axis: b.axis,
+                    grab,
+                    track_start: ts,
+                    track_len: tl,
+                    thumb_len: len,
+                    max: b.max,
+                });
                 self.drag_to(p);
                 return;
             }
@@ -861,9 +1005,18 @@ impl Ui {
             }
         }
         if let Some(f) = down {
-            env.call(&f, &MouseDownEvent { position: p, button, modifiers: self.mods });
+            env.call(
+                &f,
+                &MouseDownEvent {
+                    position: p,
+                    button,
+                    modifiers: self.mods,
+                },
+            );
         }
-        self.pressed = self.click_target(hit).map(|i| (self.arena.nodes[i].key, button));
+        self.pressed = self
+            .click_target(hit)
+            .map(|i| (self.arena.nodes[i].key, button));
     }
 
     /// Scroll wheel / track pad. `delta` is in logical pixels, positive = scroll up/left
@@ -919,7 +1072,9 @@ impl Ui {
     }
 
     pub fn file_drop(&mut self, target: u64, event: FileDropEvent, env: &mut Env) {
-        let Some(i) = self.arena.nodes.iter().position(|n| n.key == target) else { return };
+        let Some(i) = self.arena.nodes.iter().position(|n| n.key == target) else {
+            return;
+        };
         let h = &self.arena.nodes[i].handlers;
         if let Some(f) = &h.file_drop {
             env.call(f, &event);
@@ -934,7 +1089,9 @@ impl Ui {
 
     /// Delivers `action` to the innermost node (from the focus, else the root) that handles it.
     pub fn dispatch_action(&mut self, a: &dyn Action, env: &mut Env) -> bool {
-        let origin = self.focus_idx().or(if self.has_root() { Some(0) } else { None });
+        let origin = self
+            .focus_idx()
+            .or(if self.has_root() { Some(0) } else { None });
         self.dispatch_from(origin, a, env)
     }
 
@@ -942,7 +1099,12 @@ impl Ui {
         let tid = a.type_id_of();
         let mut handled = false;
         while let Some(i) = cur {
-            if let Some((_, f)) = self.arena.nodes[i].handlers.actions.iter().find(|(t, _)| *t == tid) {
+            if let Some((_, f)) = self.arena.nodes[i]
+                .handlers
+                .actions
+                .iter()
+                .find(|(t, _)| *t == tid)
+            {
                 handled = true;
                 if !env.call(f, a.as_any()) {
                     break;
@@ -955,7 +1117,14 @@ impl Ui {
 
     /// Key press: resolve key bindings against the context stack of the focus path; if none
     /// matches, give the innermost `on_key_down` handler the event.
-    pub fn key_down(&mut self, key: Option<Key>, text: Option<Arc<str>>, repeat: bool, keymap: &Keymap, env: &mut Env) {
+    pub fn key_down(
+        &mut self,
+        key: Option<Key>,
+        text: Option<Arc<str>>,
+        repeat: bool,
+        keymap: &Keymap,
+        env: &mut Env,
+    ) {
         if !self.has_root() {
             return;
         }
@@ -984,7 +1153,15 @@ impl Ui {
         while let Some(i) = cur {
             if let Some(f) = self.arena.nodes[i].handlers.key_down.clone() {
                 if let Some(k) = key {
-                    env.call(&f, &KeyDownEvent { key: k, modifiers: self.mods, text, repeat });
+                    env.call(
+                        &f,
+                        &KeyDownEvent {
+                            key: k,
+                            modifiers: self.mods,
+                            text,
+                            repeat,
+                        },
+                    );
                 }
                 return;
             }
@@ -1059,17 +1236,39 @@ mod tests {
             let mut ui = Ui::new();
             ui.set_size(Vec2::new(400.0, 300.0), 1.0);
             ui.set_root(view(&cx));
-            let mut h = Harness { ui, state: State::default(), cx, images: ImageStore::default(), keymap: Keymap::default() };
+            let mut h = Harness {
+                ui,
+                state: State::default(),
+                cx,
+                images: ImageStore::default(),
+                keymap: Keymap::default(),
+            };
             h.frame(0.016);
             h
         }
         fn frame(&mut self, dt: f32) -> bool {
             let mut tm = PlaceholderMeasurer;
             let input_text = self.ui.input_text.clone();
-            self.ui.frame(dt, dt, &mut LayoutEnv { text: &mut tm, input_text: Some(&input_text), images: &mut self.images }).0
+            self.ui
+                .frame(
+                    dt,
+                    dt,
+                    &mut LayoutEnv {
+                        text: &mut tm,
+                        input_text: Some(&input_text),
+                        images: &mut self.images,
+                    },
+                )
+                .0
         }
         fn env(&mut self) -> (&mut Ui, Env<'_>) {
-            (&mut self.ui, Env { state: &mut self.state, cx: &mut self.cx })
+            (
+                &mut self.ui,
+                Env {
+                    state: &mut self.state,
+                    cx: &mut self.cx,
+                },
+            )
         }
         fn mv(&mut self, x: f32, y: f32) {
             let (ui, mut env) = self.env();
@@ -1105,16 +1304,24 @@ mod tests {
     #[test]
     fn focus_changes_follow_clicks_window_activation_and_node_removal() {
         fn target(id: &'static str, cx: &Context<State>) -> Node {
-            node().id(id).size(100., 100.).focusable(true).on_focus_change(
-                cx.listener(move |state: &mut State, cx: &mut Context<State>, e: &FocusChangeEvent| {
-                    assert_eq!(cx.is_focused(&Id::new(id)), e.focused);
-                    state.focus_events.push((id, e.focused));
-                }),
-            )
+            node()
+                .id(id)
+                .size(100., 100.)
+                .focusable(true)
+                .on_focus_change(cx.listener(
+                    move |state: &mut State, cx: &mut Context<State>, e: &FocusChangeEvent| {
+                        assert_eq!(cx.is_focused(&Id::new(id)), e.focused);
+                        state.focus_events.push((id, e.focused));
+                    },
+                ))
         }
 
         let mut h = Harness::new(|cx| {
-            node().fill_parent().row().child(target("first", cx)).child(target("second", cx))
+            node()
+                .fill_parent()
+                .row()
+                .child(target("first", cx))
+                .child(target("second", cx))
         });
         h.click(10., 10.);
         assert_eq!(h.take_focus_events(), [("first", true)]);
@@ -1151,24 +1358,43 @@ mod tests {
     fn input_retains_in_place_edits_and_gates_clipboard_mutations() {
         use crate::text_input::ClipboardCommand;
         fn view(cx: &Context<State>, content: &str, enabled: bool) -> Node {
-            node().id("input").size(180.0, 36.0).text(
-                Text::new(content).input(TextInput::new().enabled(enabled).prompt("Type here")),
-            ).on_text_change(cx.listener(|state: &mut State, _: &mut Context<State>, event: TextChangeEvent| {
-                state.text = event.content;
-            }))
+            node()
+                .id("input")
+                .size(180.0, 36.0)
+                .text(
+                    Text::new(content).input(TextInput::new().enabled(enabled).prompt("Type here")),
+                )
+                .on_text_change(cx.listener(
+                    |state: &mut State, _: &mut Context<State>, event: TextChangeEvent| {
+                        state.text = event.content;
+                    },
+                ))
         }
         let primary = Modifiers::primary();
         let mut h = Harness::new(|cx| view(cx, "", true));
-        assert!(h.ui.list.ops.iter().any(|op| matches!(op, DrawOp::InputText(t) if &*t.content == "Type here")));
+        assert!(
+            h.ui.list
+                .ops
+                .iter()
+                .any(|op| matches!(op, DrawOp::InputText(t) if &*t.content == "Type here"))
+        );
         h.click(12.0, 15.0);
         assert_eq!(h.ui.focus, Some(Id::new("input").hash));
-        assert!(matches!(h.edit(None, Modifiers::NONE, Some("one e\u{301}")), InputKey::Handled));
+        assert!(matches!(
+            h.edit(None, Modifiers::NONE, Some("one e\u{301}")),
+            InputKey::Handled
+        ));
         assert_eq!(&*h.state.text, "one e\u{301}");
         h.ui.set_root(view(&h.cx, "", true));
         h.frame(0.0);
-        assert_eq!(&*h.ui.arena.nodes[0].text.as_ref().unwrap().content, "one e\u{301}");
+        assert_eq!(
+            &*h.ui.arena.nodes[0].text.as_ref().unwrap().content,
+            "one e\u{301}"
+        );
         h.edit(Some(Key::Left), Modifiers::SHIFT, None);
-        assert!(matches!(h.edit(Some(Key::C), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "e\u{301}"));
+        assert!(
+            matches!(h.edit(Some(Key::C), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "e\u{301}")
+        );
         let request = h.ui.paste_target().unwrap();
         {
             let (ui, mut env) = h.env();
@@ -1183,35 +1409,62 @@ mod tests {
         let old_paste = h.ui.paste_target().unwrap();
         h.ui.set_root(view(&h.cx, "locked", false));
         h.edit(Some(Key::A), primary, None);
-        assert!(matches!(h.edit(Some(Key::X), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "locked"));
+        assert!(
+            matches!(h.edit(Some(Key::X), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "locked")
+        );
         h.edit(Some(Key::Backspace), Modifiers::NONE, None);
         assert!(h.ui.paste_target().is_none());
         {
             let (ui, mut env) = h.env();
             assert!(!ui.paste(old_paste, "unexpected", &mut env));
         }
-        assert_eq!(&*h.ui.arena.nodes[0].text.as_ref().unwrap().content, "locked");
+        assert_eq!(
+            &*h.ui.arena.nodes[0].text.as_ref().unwrap().content,
+            "locked"
+        );
     }
 
     #[test]
     fn input_paints_drag_selection_and_fades_the_configured_caret() {
-        let mut h = Harness::new(|_| node().id("input").size(180.0, 40.0).padding(6.0)
-            .text(Text::new("some text").input(TextInput::new().caret_color(0xff00ff))));
-        let caret_alpha = |h: &Harness| h.ui.list.ops.iter().find_map(|op| match op {
-            DrawOp::Quad(q) if q.fill[..3] == [1.0, 0.0, 1.0] => Some(q.fill[3]),
-            _ => None,
+        let mut h = Harness::new(|_| {
+            node()
+                .id("input")
+                .size(180.0, 40.0)
+                .padding(6.0)
+                .text(Text::new("some text").input(TextInput::new().caret_color(0xff00ff)))
         });
+        let caret_alpha = |h: &Harness| {
+            h.ui.list.ops.iter().find_map(|op| match op {
+                DrawOp::Quad(q) if q.fill[..3] == [1.0, 0.0, 1.0] => Some(q.fill[3]),
+                _ => None,
+            })
+        };
         {
             let (ui, mut env) = h.env();
-            ui.pointer_button(MouseButton::Left, true, Some(Vec2::new(6.0, 20.0)), &mut env);
+            ui.pointer_button(
+                MouseButton::Left,
+                true,
+                Some(Vec2::new(6.0, 20.0)),
+                &mut env,
+            );
             ui.pointer_moved(Some(Vec2::new(140.0, 20.0)), &mut env);
-            ui.pointer_button(MouseButton::Left, false, Some(Vec2::new(140.0, 20.0)), &mut env);
+            ui.pointer_button(
+                MouseButton::Left,
+                false,
+                Some(Vec2::new(140.0, 20.0)),
+                &mut env,
+            );
         }
         assert!(matches!(h.edit(Some(Key::Copy), Modifiers::NONE, None),
             InputKey::Clipboard(crate::text_input::ClipboardCommand::Copy(t)) if &*t == "some text"));
         h.frame(0.0);
         assert_eq!(caret_alpha(&h), Some(1.0));
-        assert!(h.ui.list.ops.iter().any(|op| matches!(op, DrawOp::Quad(q) if q.fill == [0.26, 0.49, 0.88, 0.45])));
+        assert!(
+            h.ui.list
+                .ops
+                .iter()
+                .any(|op| matches!(op, DrawOp::Quad(q) if q.fill == [0.26, 0.49, 0.88, 0.45]))
+        );
         assert!(h.frame(0.60));
         assert!((caret_alpha(&h).unwrap() - 0.5).abs() < 0.01);
         assert!(!h.frame(0.15));
@@ -1226,7 +1479,11 @@ mod tests {
     #[test]
     fn click_calls_listener() {
         let mut h = Harness::new(|cx| {
-            node().size(grow(), grow()).child(node().size(fixed(100.0), fixed(100.0)).on_click(cx.listener(clicked)))
+            node().size(grow(), grow()).child(
+                node()
+                    .size(fixed(100.0), fixed(100.0))
+                    .on_click(cx.listener(clicked)),
+            )
         });
         h.click(50.0, 50.0);
         assert_eq!(h.state.clicks, 1);
@@ -1243,9 +1500,18 @@ mod tests {
                 .on_action(cx.listener(reset))
                 .on_action(cx.listener(change))
         });
-        h.keymap.add(KeyBinding::new(Key::R, Reset, Some("counter")));
-        h.keymap.add(KeyBinding::new(Key::Up, Change { amount: 5 }, Some("counter")));
-        h.keymap.add(KeyBinding::new(Key::Up.with(Modifiers::SHIFT), Change { amount: 50 }, None));
+        h.keymap
+            .add(KeyBinding::new(Key::R, Reset, Some("counter")));
+        h.keymap.add(KeyBinding::new(
+            Key::Up,
+            Change { amount: 5 },
+            Some("counter"),
+        ));
+        h.keymap.add(KeyBinding::new(
+            Key::Up.with(Modifiers::SHIFT),
+            Change { amount: 50 },
+            None,
+        ));
         h.key(Key::Up);
         h.key(Key::Up);
         assert_eq!(h.state.value, 10);
@@ -1258,9 +1524,15 @@ mod tests {
 
     #[test]
     fn binding_with_wrong_context_does_not_fire() {
-        let mut h = Harness::new(|cx| node().size(grow(), grow()).key_context("other").on_action(cx.listener(reset)));
+        let mut h = Harness::new(|cx| {
+            node()
+                .size(grow(), grow())
+                .key_context("other")
+                .on_action(cx.listener(reset))
+        });
         h.state.value = 7;
-        h.keymap.add(KeyBinding::new(Key::R, Reset, Some("counter")));
+        h.keymap
+            .add(KeyBinding::new(Key::R, Reset, Some("counter")));
         h.key(Key::R);
         assert_eq!(h.state.value, 7);
     }
@@ -1271,7 +1543,11 @@ mod tests {
             node()
                 .size(grow(), grow())
                 .on_action(cx.listener(change))
-                .child(node().size(fixed(50.0), fixed(50.0)).on_click_action(Change { amount: 3 }))
+                .child(
+                    node()
+                        .size(fixed(50.0), fixed(50.0))
+                        .on_click_action(Change { amount: 3 }),
+                )
                 .child(node().size(fixed(50.0), fixed(50.0)).on_click_action(Reset))
         });
         h.click(10.0, 10.0);
@@ -1288,7 +1564,11 @@ mod tests {
                 .size(grow(), grow())
                 .on_action(cx.listener(change))
                 .child(
-                    node().id("inner").focusable(true).size(fixed(100.0), fixed(100.0)).on_action(cx.listener(reset)),
+                    node()
+                        .id("inner")
+                        .focusable(true)
+                        .size(fixed(100.0), fixed(100.0))
+                        .on_action(cx.listener(reset)),
                 )
         });
         h.state.value = 9;
@@ -1304,7 +1584,11 @@ mod tests {
     #[test]
     fn hover_enter_and_leave() {
         let mut h = Harness::new(|cx| {
-            node().size(grow(), grow()).child(node().size(fixed(100.0), fixed(100.0)).on_hover(cx.listener(hover)))
+            node().size(grow(), grow()).child(
+                node()
+                    .size(fixed(100.0), fixed(100.0))
+                    .on_hover(cx.listener(hover)),
+            )
         });
         h.mv(10.0, 10.0);
         assert!(h.state.hovered);
@@ -1318,28 +1602,39 @@ mod tests {
         use crate::render::DrawOp;
 
         fn target(base: Color) -> Node {
-            node().size(100., 100.).background(base).style_when(|style, state| {
-                if state.pressed {
-                    style.background(Color::BLACK)
-                } else if state.focused {
-                    style.background(Color::hex(0x0000ff))
-                } else if state.hovered {
-                    style.background(Color::TRANSPARENT)
-                } else {
-                    style
-                }
-            })
+            node()
+                .size(100., 100.)
+                .background(base)
+                .style_when(|style, state| {
+                    if state.pressed {
+                        style.background(Color::BLACK)
+                    } else if state.focused {
+                        style.background(Color::hex(0x0000ff))
+                    } else if state.hovered {
+                        style.background(Color::TRANSPARENT)
+                    } else {
+                        style
+                    }
+                })
         }
 
         let red = Color::hex(0xff0000);
         let green = Color::hex(0x00ff00);
         let blue = Color::hex(0x0000ff);
-        let mut h = Harness::new(|_| node().row().children([target(red), target(green).focusable(true)]));
+        let mut h = Harness::new(|_| {
+            node()
+                .row()
+                .children([target(red), target(green).focusable(true)])
+        });
         let fills = |h: &Harness| -> Vec<_> {
-            h.ui.list.ops.iter().filter_map(|op| match op {
-                DrawOp::Quad(quad) => Some(quad.fill),
-                _ => None,
-            }).collect()
+            h.ui.list
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    DrawOp::Quad(quad) => Some(quad.fill),
+                    _ => None,
+                })
+                .collect()
         };
 
         assert_eq!(fills(&h), [red.to_array(), green.to_array()]);
@@ -1385,10 +1680,15 @@ mod tests {
         let paths = ["first file.txt", "second#file.txt"];
         let mut h = Harness::new(|cx| {
             node().size(grow(), grow()).child(
-                node().size(fixed(100.0), fixed(100.0))
+                node()
+                    .size(fixed(100.0), fixed(100.0))
                     .on_click(cx.listener(clicked))
                     .file_source(paths)
-                    .child(node().size(fixed(40.0), fixed(40.0)).on_hover(cx.listener(hover))),
+                    .child(
+                        node()
+                            .size(fixed(40.0), fixed(40.0))
+                            .on_hover(cx.listener(hover)),
+                    ),
             )
         });
         let origin = Some(Vec2::new(10.0, 10.0));
@@ -1407,7 +1707,10 @@ mod tests {
         let Some(SendData::Uris(uris)) = transfer.data_for_type(&TypeHint::UriList) else {
             panic!("file source must provide an outgoing URI list");
         };
-        let actual: Vec<_> = uris.iter().map(|uri| crate::app::uri_to_path(uri).unwrap()).collect();
+        let actual: Vec<_> = uris
+            .iter()
+            .map(|uri| crate::app::uri_to_path(uri).unwrap())
+            .collect();
         let expected = paths.map(|path| std::path::absolute(path).unwrap());
         assert_eq!(actual, expected);
         assert!(ui.drag_data(outside_source).is_none());
@@ -1428,22 +1731,34 @@ mod tests {
 
         ui.set_window_focus(true);
         ui.pointer_button(MouseButton::Left, true, origin, &mut env);
-        ui.set_root(node().size(grow(), grow()).file_source(std::iter::empty::<&str>()));
+        ui.set_root(
+            node()
+                .size(grow(), grow())
+                .file_source(std::iter::empty::<&str>()),
+        );
         assert!(ui.drag_data(moved).is_none());
     }
 
     #[test]
     fn file_drop_reaches_node_under_pointer() {
         let mut h = Harness::new(|cx| {
-            node().size(grow(), grow()).child(node().size(fixed(100.0), fixed(100.0)).on_file_drop(cx.listener(dropped)))
+            node().size(grow(), grow()).child(
+                node()
+                    .size(fixed(100.0), fixed(100.0))
+                    .on_file_drop(cx.listener(dropped)),
+            )
         });
         let (ui, mut env) = h.env();
         let position = Vec2::new(10.0, 10.0);
         let target = ui.drop_target(position).unwrap();
-        ui.file_drop(target, FileDropEvent {
-            paths: vec!["a.png".into(), "b.png".into()],
-            position,
-        }, &mut env);
+        ui.file_drop(
+            target,
+            FileDropEvent {
+                paths: vec!["a.png".into(), "b.png".into()],
+                position,
+            },
+            &mut env,
+        );
         assert_eq!(ui.drop_target(Vec2::new(300.0, 10.0)), None);
         assert_eq!(h.state.dropped, 2);
     }
@@ -1451,20 +1766,36 @@ mod tests {
     #[test]
     fn file_drop_action_routes_from_the_drop_target_and_can_propagate() {
         let mut h = Harness::new(|cx| {
-            node().fill_parent().on_action(cx.listener(change))
-                .child(node().size(100., 100.)
-                    .on_file_drop_action(|event| Change { amount: event.paths.len() as i32 })
-                    .on_action(cx.listener(|state: &mut State, cx: &mut Context<State>, a: &Change| {
-                        state.value += a.amount * 10;
-                        cx.propagate_action();
-                    })))
+            node()
+                .fill_parent()
+                .on_action(cx.listener(change))
+                .child(
+                    node()
+                        .size(100., 100.)
+                        .on_file_drop_action(|event| Change {
+                            amount: event.paths.len() as i32,
+                        })
+                        .on_action(cx.listener(
+                            |state: &mut State, cx: &mut Context<State>, a: &Change| {
+                                state.value += a.amount * 10;
+                                cx.propagate_action();
+                            },
+                        )),
+                )
                 .child(node().id("other").size(100., 100.).focusable(true))
         });
         h.ui.set_focus(Some(&Id::new("other")));
         let (ui, mut env) = h.env();
         let position = Vec2::new(10., 10.);
         let target = ui.drop_target(position).unwrap();
-        ui.file_drop(target, FileDropEvent { paths: vec!["a.png".into()], position }, &mut env);
+        ui.file_drop(
+            target,
+            FileDropEvent {
+                paths: vec!["a.png".into()],
+                position,
+            },
+            &mut env,
+        );
         assert_eq!(h.state.value, 11);
         assert!(h.ui.unhandled.is_empty());
     }
@@ -1485,11 +1816,18 @@ mod tests {
     #[test]
     fn grow_scroll_viewport_shrinks_below_its_list_and_reaches_the_last_item() {
         let mut h = Harness::new(|_| {
-            node().column().size(220., 100.)
+            node()
+                .column()
+                .size(220., 100.)
                 .child(node().height(25.))
-                .child(node().id("sidebar").column().fill_parent()
-                    .scroll(Scroll::scroll().smooth(false))
-                    .children((0..12).map(|i| node().height(20.).text(format!("Page {i}")))))
+                .child(
+                    node()
+                        .id("sidebar")
+                        .column()
+                        .fill_parent()
+                        .scroll(Scroll::scroll().smooth(false))
+                        .children((0..12).map(|i| node().height(20.).text(format!("Page {i}")))),
+                )
         });
         assert_eq!(h.ui.arena.nodes[2].rect.h, 75.);
         h.mv(10., 50.);
@@ -1511,7 +1849,18 @@ mod tests {
         assert_eq!(h.ui.arena.nodes[1].rect.y, -900.0); // clamped to content - viewport
         assert!(!h.ui.wheel(Vec2::new(0.0, -5000.0))); // already at the end: not consumed
         // Content is clipped to the viewport.
-        let quad = h.ui.list.ops.iter().find_map(|o| if let DrawOp::Quad(q) = o { Some(q) } else { None }).unwrap();
+        let quad =
+            h.ui.list
+                .ops
+                .iter()
+                .find_map(|o| {
+                    if let DrawOp::Quad(q) = o {
+                        Some(q)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
         assert_eq!((quad.clip[1], quad.clip[3]), (0.0, 100.0)); // clipped on Y only
     }
 
@@ -1528,20 +1877,31 @@ mod tests {
         }
         let mut h = Harness::new(|_| {
             let scroll = Scroll::scroll().smooth(false);
-            node().column().size(200., 100.).scroll(scroll.clone())
-                .child(node().column().size(200., 50.)
-                    .scroll(scroll.offset(Vec2::new(0., 5.)))
-                    .child(node().size(200., 70.).text("Inner")))
+            node()
+                .column()
+                .size(200., 100.)
+                .scroll(scroll.clone())
+                .child(
+                    node()
+                        .column()
+                        .size(200., 50.)
+                        .scroll(scroll.offset(Vec2::new(0., 5.)))
+                        .child(node().size(200., 70.).text("Inner")),
+                )
                 .child(node().size(200., 200.).text("Outer"))
         });
         assert_eq!(h.ui.arena.nodes[1].scroll_offset.y, 5.);
         h.mv(10., 10.);
         assert!(h.ui.wheel(Vec2::new(0., -40.)));
-        let (moving, geometry_changed) = h.ui.frame(0.016, 0.016, &mut LayoutEnv {
-            input_text: None,
-            text: &mut NoMeasure,
-            images: &mut h.images,
-        });
+        let (moving, geometry_changed) = h.ui.frame(
+            0.016,
+            0.016,
+            &mut LayoutEnv {
+                input_text: None,
+                text: &mut NoMeasure,
+                images: &mut h.images,
+            },
+        );
         assert!(!moving && geometry_changed);
         assert_eq!(h.ui.arena.nodes[1].scroll_offset.y, 20.);
         assert_eq!(h.ui.arena.nodes[0].scroll_offset.y, 25.);
@@ -1573,9 +1933,17 @@ mod tests {
         let (ui, mut env) = h.env();
         ui.pointer_button(MouseButton::Left, true, Some(Vec2::new(x, y)), &mut env);
         ui.pointer_moved(Some(Vec2::new(x, y + 40.0)), &mut env);
-        ui.pointer_button(MouseButton::Left, false, Some(Vec2::new(x, y + 40.0)), &mut env);
+        ui.pointer_button(
+            MouseButton::Left,
+            false,
+            Some(Vec2::new(x, y + 40.0)),
+            &mut env,
+        );
         h.frame(0.016);
-        assert!(h.ui.arena.nodes[1].rect.y < -100.0, "dragging the thumb scrolled the content");
+        assert!(
+            h.ui.arena.nodes[1].rect.y < -100.0,
+            "dragging the thumb scrolled the content"
+        );
     }
 
     #[test]
@@ -1597,7 +1965,10 @@ mod tests {
         h.frame(0.016);
         let sp = h.ui.states[&Id::new("s").hash].spring.as_ref().unwrap();
         let d = sp.visual.delta.x;
-        assert!(d < 0.0 && d > -100.0, "visual lags behind declared position, delta = {d}");
+        assert!(
+            d < 0.0 && d > -100.0,
+            "visual lags behind declared position, delta = {d}"
+        );
         let mut n = 0;
         while h.frame(0.016) {
             n += 1;
@@ -1610,8 +1981,15 @@ mod tests {
     #[test]
     fn reflow_spring_moves_siblings_and_preserves_hit_geometry() {
         let view = |width, cx: &Context<State>| {
-            node().row().fill_parent()
-                .child(node().id("resize").size(width, 40.).spring(Spring::new(SpringProps::WIDTH)))
+            node()
+                .row()
+                .fill_parent()
+                .child(
+                    node()
+                        .id("resize")
+                        .size(width, 40.)
+                        .spring(Spring::new(SpringProps::WIDTH)),
+                )
                 .child(node().size(35., 40.).on_click(cx.listener(clicked)))
         };
         let mut h = Harness::new(|cx| view(40., cx));
@@ -1650,7 +2028,9 @@ mod tests {
         h.frame(0.25);
         h.frame(0.05);
         assert_eq!(h.ui.list.ops.len(), base + 1, "tooltip quad drawn");
-        let DrawOp::Quad(q) = h.ui.list.ops.last().unwrap() else { panic!() };
+        let DrawOp::Quad(q) = h.ui.list.ops.last().unwrap() else {
+            panic!()
+        };
         assert!(q.fill[3] > 0.0 && q.fill[3] <= 1.0);
         // Placed below the owner and horizontally centered on it.
         assert_eq!(q.rect[1], 30.0 + 6.0);
@@ -1668,13 +2048,22 @@ mod tests {
         let mut h = Harness::new(|cx| {
             node()
                 .size(fixed(200.0), fixed(200.0))
-                .child(node().size(fixed(200.0), fixed(200.0)).on_click(cx.listener(clicked)).background(0x111111))
+                .child(
+                    node()
+                        .size(fixed(200.0), fixed(200.0))
+                        .on_click(cx.listener(clicked))
+                        .background(0x111111),
+                )
                 .child(
                     node()
                         .size(fixed(50.0), fixed(50.0))
                         .background(0xffffff)
                         .on_hover(cx.listener(hover))
-                        .floating(Floating::floating().parent_anchor(Anchor::TOP_LEFT).z_index(5)),
+                        .floating(
+                            Floating::floating()
+                                .parent_anchor(Anchor::TOP_LEFT)
+                                .z_index(5),
+                        ),
                 )
         });
         // Floating node overlaps the first child; hovering there hits the floating node.
@@ -1688,10 +2077,17 @@ mod tests {
     #[test]
     fn gradients_are_uploaded() {
         let h = Harness::new(|_| {
-            node().size(fixed(100.0), fixed(100.0)).background(Fill::linear(0.0, &[Color::hex(0xff0000), Color::hex(0x0000ff)]))
+            node()
+                .size(fixed(100.0), fixed(100.0))
+                .background(Fill::linear(
+                    0.0,
+                    &[Color::hex(0xff0000), Color::hex(0x0000ff)],
+                ))
         });
         assert_eq!(h.ui.list.gradients.len(), 1);
-        let DrawOp::Quad(q) = &h.ui.list.ops[0] else { panic!() };
+        let DrawOp::Quad(q) = &h.ui.list.ops[0] else {
+            panic!()
+        };
         assert_eq!(q.extra[1], 0.0); // gradient index 0
         assert_eq!(h.ui.list.gradients[0].params[1], 2.0); // two stops
     }
@@ -1703,11 +2099,30 @@ mod tests {
         let mut ui = Ui::new();
         ui.set_size(Vec2::new(400.0, 300.0), 1.0);
         let mut quads = Vec::new();
-        for fit in [ImageFit::Contain, ImageFit::Cover, ImageFit::Fill, ImageFit::None] {
-            ui.set_root(node().size(fixed(100.0), fixed(100.0)).image(Image::new(id).fit(fit)));
+        for fit in [
+            ImageFit::Contain,
+            ImageFit::Cover,
+            ImageFit::Fill,
+            ImageFit::None,
+        ] {
+            ui.set_root(
+                node()
+                    .size(fixed(100.0), fixed(100.0))
+                    .image(Image::new(id).fit(fit)),
+            );
             let mut tm = PlaceholderMeasurer;
-            ui.frame(0.016, 0.016, &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut store });
-            let DrawOp::Image(_, q) = ui.list.ops.last().unwrap().clone() else { panic!() };
+            ui.frame(
+                0.016,
+                0.016,
+                &mut LayoutEnv {
+                    text: &mut tm,
+                    input_text: None,
+                    images: &mut store,
+                },
+            );
+            let DrawOp::Image(_, q) = ui.list.ops.last().unwrap().clone() else {
+                panic!()
+            };
             quads.push(q);
         }
         assert_eq!(quads[0].rect, [0.0, 25.0, 100.0, 50.0]); // contain: letterboxed

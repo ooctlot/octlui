@@ -52,7 +52,9 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         .column()
         .center()
         .child_gap(24.0)
-        .child(node().text(components::Text::new(format!("{}/{MAX_COUNT}", state.value)).size(24.0)))
+        .child(
+            node().text(components::Text::new(format!("{}/{MAX_COUNT}", state.value)).size(24.0)),
+        )
         .child(
             node()
                 .size(fixed(400.0), fixed(24.0))
@@ -64,7 +66,10 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
                         .size(fraction(state.value as f32 / MAX_COUNT as f32), grow())
                         .spring(components::Spring::new(components::SpringProps::SIZE))
                         .corner_radius(12.0)
-                        .background(Fill::linear(0.0, &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)])),
+                        .background(Fill::linear(
+                            0.0,
+                            &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)],
+                        )),
                 ),
         )
         .child(
@@ -87,7 +92,11 @@ fn main() {
             KeyBinding::new(Key::Q.with(Modifiers::primary()), Quit, None),
         ]);
         acx.on_action(|_: &Quit, acx| acx.quit());
-        acx.open_window(WindowOptions::new().title("octlui counter"), State { value: 5 }, view);
+        acx.open_window(
+            WindowOptions::new().title("octlui counter"),
+            State { value: 5 },
+            view,
+        );
     });
 }
 

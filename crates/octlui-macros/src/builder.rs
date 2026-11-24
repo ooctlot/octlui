@@ -19,7 +19,10 @@ struct PropertyArgs {
 }
 
 fn is_property(attr: &Attribute) -> bool {
-    attr.path().segments.last().is_some_and(|s| s.ident == "property")
+    attr.path()
+        .segments
+        .last()
+        .is_some_and(|s| s.ident == "property")
 }
 
 fn parse_property(attr: &Attribute) -> syn::Result<PropertyArgs> {
@@ -50,7 +53,9 @@ fn unwrap_generic<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
     if seg.ident != name {
         return None;
     }
-    let PathArguments::AngleBracketed(args) = &seg.arguments else { return None };
+    let PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
     match args.args.first()? {
         GenericArgument::Type(t) => Some(t),
         _ => None,
@@ -73,11 +78,19 @@ fn to_snake(s: &str) -> String {
 }
 
 fn setter(field: &Field, args: &PropertyArgs) -> syn::Result<TokenStream> {
-    let field_ident = field.ident.clone().ok_or_else(|| {
-        syn::Error::new_spanned(field, "`#[property]` requires a named field")
-    })?;
-    let fn_ident = Ident::new(args.name.as_deref().unwrap_or(&field_ident.to_string()), Span::call_site());
-    let docs: Vec<_> = field.attrs.iter().filter(|a| a.path().is_ident("doc")).collect();
+    let field_ident = field
+        .ident
+        .clone()
+        .ok_or_else(|| syn::Error::new_spanned(field, "`#[property]` requires a named field"))?;
+    let fn_ident = Ident::new(
+        args.name.as_deref().unwrap_or(&field_ident.to_string()),
+        Span::call_site(),
+    );
+    let docs: Vec<_> = field
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("doc"))
+        .collect();
     let ty = &field.ty;
 
     // Work out the user-facing value type and how to store it.
@@ -90,19 +103,31 @@ fn setter(field: &Field, args: &PropertyArgs) -> syn::Result<TokenStream> {
                         "`boxed` properties must have the type `Option<Box<T>>`",
                     ));
                 };
-                (quote!(#boxed_inner), Box::new(|v| quote!(::core::option::Option::Some(::std::boxed::Box::new(#v)))))
+                (
+                    quote!(#boxed_inner),
+                    Box::new(|v| quote!(::core::option::Option::Some(::std::boxed::Box::new(#v)))),
+                )
             } else {
-                (quote!(#inner), Box::new(|v| quote!(::core::option::Option::Some(#v))))
+                (
+                    quote!(#inner),
+                    Box::new(|v| quote!(::core::option::Option::Some(#v))),
+                )
             }
         } else {
             if args.boxed {
-                return Err(syn::Error::new_spanned(ty, "`boxed` requires an `Option<Box<T>>` field"));
+                return Err(syn::Error::new_spanned(
+                    ty,
+                    "`boxed` requires an `Option<Box<T>>` field",
+                ));
             }
             (quote!(#ty), Box::new(|v| v))
         };
 
     let (param_ty, conv) = if args.into {
-        (quote!(impl ::core::convert::Into<#value_ty>), quote!(::core::convert::Into::into(value)))
+        (
+            quote!(impl ::core::convert::Into<#value_ty>),
+            quote!(::core::convert::Into::into(value)),
+        )
     } else {
         (value_ty, quote!(value))
     };
@@ -129,7 +154,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             let lit: LitStr = meta.value()?.parse()?;
             args.name = Some(lit.value());
         } else {
-            return Err(meta.error("unknown builder option (expected `free`, `no_constructor` or `name`)"));
+            return Err(
+                meta.error("unknown builder option (expected `free`, `no_constructor` or `name`)")
+            );
         }
         Ok(())
     });
@@ -145,7 +172,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut setters = Vec::new();
     let mut errors = TokenStream::new();
     for field in item.fields.iter_mut() {
-        let prop_attrs: Vec<Attribute> = field.attrs.iter().filter(|a| is_property(a)).cloned().collect();
+        let prop_attrs: Vec<Attribute> = field
+            .attrs
+            .iter()
+            .filter(|a| is_property(a))
+            .cloned()
+            .collect();
         if prop_attrs.is_empty() {
             continue;
         }
@@ -159,7 +191,10 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let ident = &item.ident;
     let (impl_g, ty_g, where_g) = item.generics.split_for_impl();
-    let ctor_name = args.name.clone().unwrap_or_else(|| to_snake(&ident.to_string()));
+    let ctor_name = args
+        .name
+        .clone()
+        .unwrap_or_else(|| to_snake(&ident.to_string()));
     let ctor_ident = format_ident!("{}", ctor_name);
 
     let ctor = if args.no_constructor {

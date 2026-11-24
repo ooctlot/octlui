@@ -7,7 +7,12 @@ use octlui::*;
 use std::time::Duration;
 
 pub fn showcase() -> Node {
-    let card = |c: u32| node().size(fixed(56.0), fixed(56.0)).corner_radius(12.0).background(c);
+    let card = |c: u32| {
+        node()
+            .size(fixed(56.0), fixed(56.0))
+            .corner_radius(12.0)
+            .background(c)
+    };
 
     let label = |text: &str| node().text(Text::new(text).size(14.0));
 
@@ -33,8 +38,12 @@ pub fn showcase() -> Node {
         .background(0x181825)
         .border(0x313244, 1.0)
         .scroll(
-            Scroll::scroll()
-                .scroll_bar(ScrollBar::scroll_bar().thickness(6.0).corner_radius(3.0).fade_out(Duration::from_millis(400))),
+            Scroll::scroll().scroll_bar(
+                ScrollBar::scroll_bar()
+                    .thickness(6.0)
+                    .corner_radius(3.0)
+                    .fade_out(Duration::from_millis(400)),
+            ),
         )
         .children(list_items);
 
@@ -46,14 +55,24 @@ pub fn showcase() -> Node {
             node()
                 .size(fixed(120.0), fixed(80.0))
                 .corner_radius([24.0, 4.0, 24.0, 4.0])
-                .background(Fill::linear(0.6, &[Color::hex(0xf38ba8), Color::hex(0xfab387), Color::hex(0xf9e2af)])),
+                .background(Fill::linear(
+                    0.6,
+                    &[
+                        Color::hex(0xf38ba8),
+                        Color::hex(0xfab387),
+                        Color::hex(0xf9e2af),
+                    ],
+                )),
         )
         .child(
             node()
                 .size(fixed(80.0), fixed(80.0))
                 .corner_radius(40.0)
                 .background(Fill::radial(&[Color::hex(0x89dceb), Color::hex(0x1e66f5)]))
-                .border(Fill::linear(1.57, &[Color::hex(0xcba6f7), Color::hex(0x89b4fa)]), 4.0),
+                .border(
+                    Fill::linear(1.57, &[Color::hex(0xcba6f7), Color::hex(0x89b4fa)]),
+                    4.0,
+                ),
         )
         .child(
             node()
@@ -68,9 +87,12 @@ pub fn showcase() -> Node {
         card([0xf38ba8, 0xa6e3a1, 0x89b4fa, 0xf9e2af][i])
             .id(("spring", i))
             .tooltip(Tooltip::new(
-                node().padding(8.0).corner_radius(8.0).background(0x11111b).border(0x45475a, 1.0).child(
-                    node().text(Text::new(format!("Spring card {}", i + 1)).size(14.0)),
-                ),
+                node()
+                    .padding(8.0)
+                    .corner_radius(8.0)
+                    .background(0x11111b)
+                    .border(0x45475a, 1.0)
+                    .child(node().text(Text::new(format!("Spring card {}", i + 1)).size(14.0))),
             ))
             .spring(Spring::bouncy(SpringProps::BACKGROUND | SpringProps::SIZE))
     }));
@@ -120,22 +142,49 @@ pub fn showcase() -> Node {
         .child(label("Hover over a card to see its tooltip"))
         .child(springy)
         .child(label("Right-to-left layout and floating badge"))
-        .child(node().row().child_gap(20.0).child(aligned).child(with_badge))
+        .child(
+            node()
+                .row()
+                .child_gap(20.0)
+                .child(aligned)
+                .child(with_badge),
+        )
         .child(label("Progress: 60%"))
-        .child(node().size(grow(), fixed(10.0)).corner_radius(5.0).background(0x313244).clip(Clip::X).child(
-            node().width(fraction(0.6)).height(grow()).corner_radius(5.0).background(Fill::linear(
-                0.0,
-                &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)],
-            )),
-        ));
+        .child(
+            node()
+                .size(grow(), fixed(10.0))
+                .corner_radius(5.0)
+                .background(0x313244)
+                .clip(Clip::X)
+                .child(
+                    node()
+                        .width(fraction(0.6))
+                        .height(grow())
+                        .corner_radius(5.0)
+                        .background(Fill::linear(
+                            0.0,
+                            &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)],
+                        )),
+                ),
+        );
 
-    node().size(grow(), grow()).row().child_gap(16.0).padding(16.0).child(sidebar).child(main)
+    node()
+        .size(grow(), grow())
+        .row()
+        .child_gap(16.0)
+        .padding(16.0)
+        .child(sidebar)
+        .child(main)
 }
 
 #[allow(dead_code)]
 fn main() {
     struct Showcase;
     application().run(|acx: &mut AppContext| {
-        acx.open_window(WindowOptions::new().title("octlui showcase"), Showcase, |_: &mut Showcase, _: &mut Context<Showcase>| showcase());
+        acx.open_window(
+            WindowOptions::new().title("octlui showcase"),
+            Showcase,
+            |_: &mut Showcase, _: &mut Context<Showcase>| showcase(),
+        );
     });
 }

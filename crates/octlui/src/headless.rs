@@ -25,7 +25,12 @@ impl Screenshot {
     }
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let i = ((y * self.width + x) * 4) as usize;
-        [self.rgba[i], self.rgba[i + 1], self.rgba[i + 2], self.rgba[i + 3]]
+        [
+            self.rgba[i],
+            self.rgba[i + 1],
+            self.rgba[i + 2],
+            self.rgba[i + 3],
+        ]
     }
 }
 
@@ -46,12 +51,17 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 impl HeadlessRenderer {
     /// `width`/`height` are physical pixels; layout happens in logical pixels (`px / scale`).
     pub fn new(width: u32, height: u32, scale: f32) -> Result<Self, GpuError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let gpu = GpuContext::new(instance, None)?;
         let mut renderer = Renderer::new(&gpu, FORMAT);
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("octlui headless target"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -61,7 +71,10 @@ impl HeadlessRenderer {
         });
         let mut ui = Ui::new();
         renderer.set_input_text(ui.input_text.clone());
-        ui.set_size(Vec2::new(width as f32 / scale, height as f32 / scale), scale);
+        ui.set_size(
+            Vec2::new(width as f32 / scale, height as f32 / scale),
+            scale,
+        );
         Ok(Self {
             gpu,
             renderer,
@@ -99,15 +112,29 @@ impl HeadlessRenderer {
     /// Advances animations by `dt` seconds and re-lays out. Returns `true` while animating.
     pub fn frame(&mut self, dt: f32) -> bool {
         let input_text = self.ui.input_text.clone();
-        let mut env = LayoutEnv { text: &mut *self.measurer, input_text: Some(&input_text), images: &mut self.images };
+        let mut env = LayoutEnv {
+            text: &mut *self.measurer,
+            input_text: Some(&input_text),
+            images: &mut self.images,
+        };
         self.ui.frame(dt, dt, &mut env).0
     }
 
     /// Renders the current frame and reads it back.
     pub fn read_pixels(&mut self) -> Screenshot {
         let (w, h) = self.size_px;
-        let view = self.target.create_view(&wgpu::TextureViewDescriptor::default());
-        self.renderer.render(&self.gpu, &view, (w, h), self.scale, &self.ui.list, self.clear, &mut self.images);
+        let view = self
+            .target
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.renderer.render(
+            &self.gpu,
+            &view,
+            (w, h),
+            self.scale,
+            &self.ui.list,
+            self.clear,
+            &mut self.images,
+        );
 
         let bpr = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -126,14 +153,25 @@ impl HeadlessRenderer {
             },
             wgpu::TexelCopyBufferInfo {
                 buffer: &buf,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) },
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpr),
+                    rows_per_image: Some(h),
+                },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         self.gpu.queue.submit(Some(enc.finish()));
         let slice = buf.slice(..);
         slice.map_async(wgpu::MapMode::Read, |r| r.expect("map readback buffer"));
-        self.gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll device");
+        self.gpu
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("poll device");
         let data = slice.get_mapped_range().expect("mapped range");
         let mut rgba = Vec::with_capacity((w * h * 4) as usize);
         for row in data.chunks_exact(bpr as usize).take(h as usize) {
@@ -151,7 +189,11 @@ impl HeadlessRenderer {
                 }
             }
         }
-        Screenshot { width: w, height: h, rgba }
+        Screenshot {
+            width: w,
+            height: h,
+            rgba,
+        }
     }
 
     /// `set_root` + one frame + `read_pixels`.

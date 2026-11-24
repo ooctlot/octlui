@@ -78,7 +78,11 @@ impl Modifiers {
 
     /// The platform's "primary" shortcut modifier: `META` on macOS, `CTRL` elsewhere.
     pub const fn primary() -> Modifiers {
-        if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CTRL }
+        if cfg!(target_os = "macos") {
+            Modifiers::META
+        } else {
+            Modifiers::CTRL
+        }
     }
     pub const fn contains(self, o: Modifiers) -> bool {
         self.0 & o.0 == o.0
@@ -193,7 +197,11 @@ impl KeyBinding {
     /// KeyBinding::new(Key::R, Reset, Some("counter"))
     /// KeyBinding::new(Key::S.with(Modifiers::primary()), Save, None)
     /// ```
-    pub fn new(keystroke: impl Into<Keystroke>, action: impl Action, context: Option<&str>) -> Self {
+    pub fn new(
+        keystroke: impl Into<Keystroke>,
+        action: impl Action,
+        context: Option<&str>,
+    ) -> Self {
         Self {
             keystroke: keystroke.into(),
             action: Box::new(action),
@@ -246,16 +254,28 @@ mod tests {
     #[derive(Clone, Debug)]
     struct A1;
     impl Action for A1 {
-        fn name(&self) -> &'static str { "A1" }
-        fn as_any(&self) -> &dyn Any { self }
-        fn boxed_clone(&self) -> Box<dyn Action> { Box::new(A1) }
+        fn name(&self) -> &'static str {
+            "A1"
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn boxed_clone(&self) -> Box<dyn Action> {
+            Box::new(A1)
+        }
     }
 
     #[test]
     fn parse_keystrokes() {
-        assert_eq!(Keystroke::parse("ctrl-shift-s"), Some(Key::S.with(Modifiers::CTRL | Modifiers::SHIFT)));
+        assert_eq!(
+            Keystroke::parse("ctrl-shift-s"),
+            Some(Key::S.with(Modifiers::CTRL | Modifiers::SHIFT))
+        );
         assert_eq!(Keystroke::parse("f5"), Some(Key::F5.into()));
-        assert_eq!(Keystroke::parse("ctrl--"), Some(Key::Minus.with(Modifiers::CTRL)));
+        assert_eq!(
+            Keystroke::parse("ctrl--"),
+            Some(Key::Minus.with(Modifiers::CTRL))
+        );
         assert_eq!(Keystroke::parse("bogus-a"), None);
     }
 

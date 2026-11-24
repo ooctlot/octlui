@@ -94,7 +94,12 @@ impl RenderList {
         }
     }
 
-    fn push_gradient(&mut self, kind: f32, stops: &[crate::geometry::ColorStop], dir: (f32, f32)) -> f32 {
+    fn push_gradient(
+        &mut self,
+        kind: f32,
+        stops: &[crate::geometry::ColorStop],
+        dir: (f32, f32),
+    ) -> f32 {
         let mut g = GpuGradient::zeroed();
         for (i, s) in stops.iter().enumerate() {
             g.colors[i] = s.color.to_array();

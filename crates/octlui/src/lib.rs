@@ -3,8 +3,8 @@
 extern crate self as octlui;
 
 pub mod action;
-pub mod app;
 pub mod anim;
+pub mod app;
 pub mod components;
 pub mod ctx;
 pub mod events;

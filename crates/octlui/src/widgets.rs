@@ -1,4 +1,4 @@
-use crate::components::{Appearance};
+use crate::components::Appearance;
 use crate::geometry::Color;
 use crate::style::InteractionState;
 

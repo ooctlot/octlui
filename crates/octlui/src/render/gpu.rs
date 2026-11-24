@@ -33,7 +33,10 @@ pub struct GpuContext {
 impl GpuContext {
     /// Creates a context. Pass the first window's surface so the adapter is guaranteed to be
     /// able to present to it.
-    pub fn new(instance: wgpu::Instance, compatible_surface: Option<&wgpu::Surface<'_>>) -> Result<Self, GpuError> {
+    pub fn new(
+        instance: wgpu::Instance,
+        compatible_surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<Self, GpuError> {
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface,
@@ -46,7 +49,12 @@ impl GpuContext {
             ..Default::default()
         }))
         .map_err(|e| GpuError::Device(e.to_string()))?;
-        Ok(Self { instance, adapter, device, queue })
+        Ok(Self {
+            instance,
+            adapter,
+            device,
+            queue,
+        })
     }
 }
 
@@ -65,9 +73,17 @@ struct GpuImage {
 }
 
 enum Batch {
-    Glyphs { page: usize, range: std::ops::Range<u32> },
-    Quads { image: Option<ImageId>, range: std::ops::Range<u32> },
-    Text { range: std::ops::Range<usize> },
+    Glyphs {
+        page: usize,
+        range: std::ops::Range<u32>,
+    },
+    Quads {
+        image: Option<ImageId>,
+        range: std::ops::Range<u32>,
+    },
+    Text {
+        range: std::ops::Range<usize>,
+    },
 }
 
 /// Draws [`RenderList`]s into any texture view.
@@ -188,7 +204,10 @@ impl Renderer {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
@@ -212,9 +231,18 @@ impl Renderer {
         let gradient_cap = 64;
         let instance_buf = Self::make_instance_buf(device, instance_cap);
         let gradient_buf = Self::make_gradient_buf(device, gradient_cap);
-        let globals_group = Self::make_globals_group(device, &globals_layout, &globals_buf, &gradient_buf);
+        let globals_group =
+            Self::make_globals_group(device, &globals_layout, &globals_buf, &gradient_buf);
 
-        let white = Self::upload_texture(gpu, &texture_layout, &sampler, 1, 1, &[255, 255, 255, 255], 0);
+        let white = Self::upload_texture(
+            gpu,
+            &texture_layout,
+            &sampler,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            0,
+        );
 
         Self {
             format,
@@ -287,8 +315,14 @@ impl Renderer {
             label: Some("octlui globals group"),
             layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: gradients.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: gradients.as_entire_binding(),
+                },
             ],
         })
     }
@@ -304,7 +338,11 @@ impl Renderer {
     ) -> GpuImage {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("octlui image"),
-            size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -321,23 +359,43 @@ impl Renderer {
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         let view = texture.create_view(&Default::default());
         let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("octlui image group"),
             layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
             ],
         });
-        GpuImage { _texture: texture, bind_group, version }
+        GpuImage {
+            _texture: texture,
+            bind_group,
+            version,
+        }
     }
 
     fn ensure_image(&mut self, gpu: &GpuContext, store: &mut ImageStore, id: ImageId) -> bool {
-        let Some((data, version)) = store.get(id) else { return false };
+        let Some((data, version)) = store.get(id) else {
+            return false;
+        };
         if self.images.get(&id.0).is_some_and(|g| g.version == version) {
             return true;
         }
@@ -345,7 +403,15 @@ impl Renderer {
         if data.width == 0 || data.height == 0 || data.width > max || data.height > max {
             return false;
         }
-        let img = Self::upload_texture(gpu, &self.texture_layout, &self.sampler, data.width, data.height, &data.rgba, version);
+        let img = Self::upload_texture(
+            gpu,
+            &self.texture_layout,
+            &self.sampler,
+            data.width,
+            data.height,
+            &data.rgba,
+            version,
+        );
         self.images.insert(id.0, img);
         true
     }
@@ -389,13 +455,27 @@ impl Renderer {
                 DrawOp::InputText(t) | DrawOp::Text(t) => {
                     self.glyphs.clear();
                     let input = matches!(op, DrawOp::InputText(_));
-                    self.native.prepare(gpu, &self.texture_layout, &self.sampler, t, input, scale, &mut self.colors, &mut self.glyphs);
+                    self.native.prepare(
+                        gpu,
+                        &self.texture_layout,
+                        &self.sampler,
+                        t,
+                        input,
+                        scale,
+                        &mut self.colors,
+                        &mut self.glyphs,
+                    );
                     for &(page, quad) in &self.glyphs {
                         let i = self.instances.len() as u32;
                         self.instances.push(quad);
                         match self.batches.last_mut() {
-                            Some(Batch::Glyphs { page: prev, range }) if *prev == page => range.end = i + 1,
-                            _ => self.batches.push(Batch::Glyphs { page, range: i..i + 1 }),
+                            Some(Batch::Glyphs { page: prev, range }) if *prev == page => {
+                                range.end = i + 1
+                            }
+                            _ => self.batches.push(Batch::Glyphs {
+                                page,
+                                range: i..i + 1,
+                            }),
                         }
                     }
                 }
@@ -408,7 +488,8 @@ impl Renderer {
             scale,
             srgb_target: if self.format.is_srgb() { 1.0 } else { 0.0 },
         };
-        gpu.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        gpu.queue
+            .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
         let mut regroup = false;
         if self.instances.len() > self.instance_cap {
@@ -421,21 +502,34 @@ impl Renderer {
             regroup = true;
         }
         if regroup {
-            self.globals_group =
-                Self::make_globals_group(&gpu.device, &self.globals_layout, &self.globals_buf, &self.gradient_buf);
+            self.globals_group = Self::make_globals_group(
+                &gpu.device,
+                &self.globals_layout,
+                &self.globals_buf,
+                &self.gradient_buf,
+            );
         }
         if !self.instances.is_empty() {
-            gpu.queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&self.instances));
+            gpu.queue
+                .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&self.instances));
         }
         if !self.colors.gradients.is_empty() {
-            gpu.queue.write_buffer(&self.gradient_buf, 0, bytemuck::cast_slice(&self.colors.gradients));
+            gpu.queue.write_buffer(
+                &self.gradient_buf,
+                0,
+                bytemuck::cast_slice(&self.colors.gradients),
+            );
         }
         if !self.runs.is_empty() {
             self.text.as_mut().unwrap().prepare(gpu, &self.runs, scale);
         }
 
         // ---- encode ----
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("octlui frame") });
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("octlui frame"),
+            });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("octlui pass"),
@@ -493,7 +587,10 @@ impl Renderer {
         self.instances.push(q);
         match self.batches.last_mut() {
             Some(Batch::Quads { image: im, range }) if *im == image => range.end = i + 1,
-            _ => self.batches.push(Batch::Quads { image, range: i..i + 1 }),
+            _ => self.batches.push(Batch::Quads {
+                image,
+                range: i..i + 1,
+            }),
         }
     }
 }
@@ -504,9 +601,12 @@ mod tests {
     fn shader_validates() {
         let src = include_str!("shader.wgsl");
         let module = naga::front::wgsl::parse_str(src).expect("wgsl parse");
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
-            .validate(&module)
-            .expect("wgsl validation");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .expect("wgsl validation");
     }
 
     #[test]

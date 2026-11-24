@@ -169,7 +169,10 @@ impl Node {
     /// });
     /// ```
     #[must_use]
-    pub fn style_when(mut self, callback: impl Fn(Appearance, InteractionState) -> Appearance + 'static) -> Self {
+    pub fn style_when(
+        mut self,
+        callback: impl Fn(Appearance, InteractionState) -> Appearance + 'static,
+    ) -> Self {
         self.style_callback = Some(Rc::new(callback));
         self
     }
@@ -247,12 +250,21 @@ impl Node {
             return self;
         }
         self.drag_source(move || {
-            let uris = paths.iter()
-                .map(|path| url::Url::from_file_path(path::absolute(path).ok()?).ok().map(String::from))
+            let uris = paths
+                .iter()
+                .map(|path| {
+                    url::Url::from_file_path(path::absolute(path).ok()?)
+                        .ok()
+                        .map(String::from)
+                })
                 .collect::<Option<Vec<_>>>()?;
-            Some(DataTransferSendBuilder::new(uris)
-                .with_type(TypeHint::UriList, |uris, _| Some(SendData::Uris(uris.clone())))
-                .build())
+            Some(
+                DataTransferSendBuilder::new(uris)
+                    .with_type(TypeHint::UriList, |uris, _| {
+                        Some(SendData::Uris(uris.clone()))
+                    })
+                    .build(),
+            )
         })
     }
     /// Supplies native drag data in any format supported by the active winit backend.
@@ -260,7 +272,10 @@ impl Node {
     /// The factory runs once per drag gesture and can return `None` to skip that drag. The
     /// destination is offered a copy operation. Use [`crate::data_transfer`] to build the payload.
     #[must_use]
-    pub fn drag_source(mut self, make_data: impl Fn() -> Option<Box<dyn DataTransferSend>> + 'static) -> Self {
+    pub fn drag_source(
+        mut self,
+        make_data: impl Fn() -> Option<Box<dyn DataTransferSend>> + 'static,
+    ) -> Self {
         self.handlers.drag_source = Some(Rc::new(make_data));
         self
     }
@@ -272,5 +287,4 @@ impl Node {
         self.handlers.actions.push((tid, l.f));
         self
     }
-
 }

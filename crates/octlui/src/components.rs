@@ -129,7 +129,11 @@ pub struct Image {
 }
 impl Image {
     pub fn new(source: ImageId) -> Self {
-        Self { source, tint: Fill::Solid(Color::WHITE), fit: ImageFit::Contain }
+        Self {
+            source,
+            tint: Fill::Solid(Color::WHITE),
+            fit: ImageFit::Contain,
+        }
     }
 }
 impl From<ImageId> for Image {
@@ -236,7 +240,14 @@ pub struct Scroll {
 }
 impl Default for Scroll {
     fn default() -> Self {
-        Self { axes: Clip::Y, offset: None, smooth: true, smooth_rate: 18.0, wheel: true, scroll_bar: None }
+        Self {
+            axes: Clip::Y,
+            offset: None,
+            smooth: true,
+            smooth_rate: 18.0,
+            wheel: true,
+            scroll_bar: None,
+        }
     }
 }
 
@@ -295,9 +306,8 @@ impl SpringProps {
     pub const BORDER_WIDTH: SpringProps = SpringProps(1 << 11);
     pub const FLOATING_OFFSET: SpringProps = SpringProps(1 << 12);
     /// Animates width, height, padding and child gap with reflow.
-    pub const LAYOUT: SpringProps = SpringProps(
-        Self::WIDTH.0 | Self::HEIGHT.0 | Self::PADDING.0 | Self::CHILD_GAP.0,
-    );
+    pub const LAYOUT: SpringProps =
+        SpringProps(Self::WIDTH.0 | Self::HEIGHT.0 | Self::PADDING.0 | Self::CHILD_GAP.0);
     /// Original visual spring properties, including position, size and paints.
     pub const ALL: SpringProps = SpringProps(63);
     pub const fn contains(self, o: SpringProps) -> bool {
@@ -336,11 +346,21 @@ impl Spring {
     /// Critically damped spring (no overshoot).
     pub fn new(properties: SpringProps) -> Self {
         let p = SpringParams::default();
-        Self { properties, stiffness: p.stiffness, damping: p.damping, mass: p.mass, precision: p.precision }
+        Self {
+            properties,
+            stiffness: p.stiffness,
+            damping: p.damping,
+            mass: p.mass,
+            precision: p.precision,
+        }
     }
     /// Lightly damped spring that overshoots and wobbles.
     pub fn bouncy(properties: SpringProps) -> Self {
-        Self { stiffness: 400.0, damping: 18.0, ..Self::new(properties) }
+        Self {
+            stiffness: 400.0,
+            damping: 18.0,
+            ..Self::new(properties)
+        }
     }
     pub fn params(&self) -> SpringParams {
         SpringParams {

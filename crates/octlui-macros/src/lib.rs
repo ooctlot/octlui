@@ -47,6 +47,8 @@ pub fn builder(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let msg = "`#[octlui::property]` can only be used on fields of a struct annotated with `#[octlui::builder]`";
-    let err: TokenStream = syn::Error::new(proc_macro2::Span::call_site(), msg).to_compile_error().into();
+    let err: TokenStream = syn::Error::new(proc_macro2::Span::call_site(), msg)
+        .to_compile_error()
+        .into();
     err.into_iter().chain(item).collect()
 }

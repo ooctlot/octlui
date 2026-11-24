@@ -13,7 +13,10 @@ pub struct Id {
 #[inline]
 pub(crate) fn mix(a: u64, b: u64) -> u64 {
     // splitmix64-style finalizer over a combined value
-    let mut x = a ^ b.wrapping_add(0x9e37_79b9_7f4a_7c15).wrapping_add(a << 6).wrapping_add(a >> 2);
+    let mut x = a ^ b
+        .wrapping_add(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(a << 6)
+        .wrapping_add(a >> 2);
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     x ^ (x >> 31)
@@ -31,11 +34,17 @@ fn fnv(s: &str) -> u64 {
 impl Id {
     pub fn new(label: impl Into<Arc<str>>) -> Self {
         let label = label.into();
-        Self { hash: mix(fnv(&label), 1), label }
+        Self {
+            hash: mix(fnv(&label), 1),
+            label,
+        }
     }
     /// An id derived from this one, e.g. for list items: `Id::new("list").with_index(3)`.
     pub fn with_index(&self, index: usize) -> Id {
-        Id { hash: mix(self.hash, index as u64 + 2), label: format!("{}[{}]", self.label, index).into() }
+        Id {
+            hash: mix(self.hash, index as u64 + 2),
+            label: format!("{}[{}]", self.label, index).into(),
+        }
     }
     pub fn label(&self) -> &str {
         &self.label
@@ -89,4 +98,5 @@ impl std::hash::Hasher for KeyHasher {
         self.0 = n;
     }
 }
-pub(crate) type KeyMap<V> = std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<KeyHasher>>;
+pub(crate) type KeyMap<V> =
+    std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<KeyHasher>>;

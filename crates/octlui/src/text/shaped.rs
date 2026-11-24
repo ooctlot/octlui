@@ -97,18 +97,24 @@ pub(crate) struct Layout {
 
 impl ShapedText {
     pub(crate) fn new(fonts: Fonts, default_font: FontId) -> Self {
-        Self(Rc::new(EngineResources { fonts, default_font, engine: OnceCell::new() }))
+        Self(Rc::new(EngineResources {
+            fonts,
+            default_font,
+            engine: OnceCell::new(),
+        }))
     }
 
     fn engine(&self) -> &RefCell<Engine> {
-        self.0.engine.get_or_init(|| RefCell::new(Engine {
-            fonts: FontSystem::new(),
-            native: NativeTextMeasurer::with_fonts(self.0.fonts.clone(), self.0.default_font),
-            families: HashMap::new(),
-            rasterizer: SwashCache::new(),
-            layouts: HashMap::new(),
-            clock: 0,
-        }))
+        self.0.engine.get_or_init(|| {
+            RefCell::new(Engine {
+                fonts: FontSystem::new(),
+                native: NativeTextMeasurer::with_fonts(self.0.fonts.clone(), self.0.default_font),
+                families: HashMap::new(),
+                rasterizer: SwashCache::new(),
+                layouts: HashMap::new(),
+                clock: 0,
+            })
+        })
     }
 
     pub fn layout(
@@ -212,7 +218,11 @@ impl Engine {
                 }
             })
             .collect();
-        let layout = Rc::new(Layout { lines, size, input_lines: OnceCell::new() });
+        let layout = Rc::new(Layout {
+            lines,
+            size,
+            input_lines: OnceCell::new(),
+        });
         if cached.widths.len() == WIDTH_LIMIT {
             cached.widths.pop_back();
         }

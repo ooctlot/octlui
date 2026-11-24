@@ -96,7 +96,12 @@ pub struct Rect {
 
 impl Rect {
     /// A rect that contains every point; used as "no clip".
-    pub const INFINITE: Rect = Rect { x: -1.0e9, y: -1.0e9, w: 2.0e9, h: 2.0e9 };
+    pub const INFINITE: Rect = Rect {
+        x: -1.0e9,
+        y: -1.0e9,
+        w: 2.0e9,
+        h: 2.0e9,
+    };
 
     pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self { x, y, w, h }
@@ -151,7 +156,10 @@ impl Rect {
     }
     /// The point of this rect described by `anchor`.
     pub fn anchor_point(&self, a: Anchor) -> Vec2 {
-        vec2(self.x + self.w * a.x.factor(), self.y + self.h * a.y.factor())
+        vec2(
+            self.x + self.w * a.x.factor(),
+            self.y + self.h * a.y.factor(),
+        )
     }
 }
 
@@ -162,15 +170,42 @@ pub struct Anchor {
     pub y: Align,
 }
 impl Anchor {
-    pub const TOP_LEFT: Anchor = Anchor { x: Align::Start, y: Align::Start };
-    pub const TOP_CENTER: Anchor = Anchor { x: Align::Center, y: Align::Start };
-    pub const TOP_RIGHT: Anchor = Anchor { x: Align::End, y: Align::Start };
-    pub const CENTER_LEFT: Anchor = Anchor { x: Align::Start, y: Align::Center };
-    pub const CENTER: Anchor = Anchor { x: Align::Center, y: Align::Center };
-    pub const CENTER_RIGHT: Anchor = Anchor { x: Align::End, y: Align::Center };
-    pub const BOTTOM_LEFT: Anchor = Anchor { x: Align::Start, y: Align::End };
-    pub const BOTTOM_CENTER: Anchor = Anchor { x: Align::Center, y: Align::End };
-    pub const BOTTOM_RIGHT: Anchor = Anchor { x: Align::End, y: Align::End };
+    pub const TOP_LEFT: Anchor = Anchor {
+        x: Align::Start,
+        y: Align::Start,
+    };
+    pub const TOP_CENTER: Anchor = Anchor {
+        x: Align::Center,
+        y: Align::Start,
+    };
+    pub const TOP_RIGHT: Anchor = Anchor {
+        x: Align::End,
+        y: Align::Start,
+    };
+    pub const CENTER_LEFT: Anchor = Anchor {
+        x: Align::Start,
+        y: Align::Center,
+    };
+    pub const CENTER: Anchor = Anchor {
+        x: Align::Center,
+        y: Align::Center,
+    };
+    pub const CENTER_RIGHT: Anchor = Anchor {
+        x: Align::End,
+        y: Align::Center,
+    };
+    pub const BOTTOM_LEFT: Anchor = Anchor {
+        x: Align::Start,
+        y: Align::End,
+    };
+    pub const BOTTOM_CENTER: Anchor = Anchor {
+        x: Align::Center,
+        y: Align::End,
+    };
+    pub const BOTTOM_RIGHT: Anchor = Anchor {
+        x: Align::End,
+        y: Align::End,
+    };
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -181,9 +216,19 @@ pub struct Padding {
     pub bottom: f32,
 }
 impl Padding {
-    pub const ZERO: Padding = Padding { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+    pub const ZERO: Padding = Padding {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    };
     pub const fn new(left: f32, top: f32, right: f32, bottom: f32) -> Self {
-        Self { left, top, right, bottom }
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
     }
     pub const fn all(v: f32) -> Self {
         Self::new(v, v, v, v)
@@ -225,13 +270,26 @@ pub struct CornerRadius {
 }
 impl CornerRadius {
     pub const fn all(r: f32) -> Self {
-        Self { top_left: r, top_right: r, bottom_right: r, bottom_left: r }
+        Self {
+            top_left: r,
+            top_right: r,
+            bottom_right: r,
+            bottom_left: r,
+        }
     }
     pub const fn new(top_left: f32, top_right: f32, bottom_right: f32, bottom_left: f32) -> Self {
-        Self { top_left, top_right, bottom_right, bottom_left }
+        Self {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        }
     }
     pub fn is_zero(&self) -> bool {
-        self.top_left == 0.0 && self.top_right == 0.0 && self.bottom_right == 0.0 && self.bottom_left == 0.0
+        self.top_left == 0.0
+            && self.top_right == 0.0
+            && self.bottom_right == 0.0
+            && self.bottom_left == 0.0
     }
 }
 impl From<f32> for CornerRadius {
@@ -287,11 +345,19 @@ impl Color {
         Self { a, ..self }
     }
     pub fn mul_alpha(self, k: f32) -> Self {
-        Self { a: self.a * k, ..self }
+        Self {
+            a: self.a * k,
+            ..self
+        }
     }
     pub fn lerp(self, o: Color, t: f32) -> Color {
         let l = |a: f32, b: f32| a + (b - a) * t;
-        Color::rgba(l(self.r, o.r), l(self.g, o.g), l(self.b, o.b), l(self.a, o.a))
+        Color::rgba(
+            l(self.r, o.r),
+            l(self.g, o.g),
+            l(self.b, o.b),
+            l(self.a, o.a),
+        )
     }
     pub fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
@@ -331,7 +397,10 @@ impl Stops {
         let mut items = [ColorStop::default(); MAX_GRADIENT_STOPS];
         let n = stops.len().min(MAX_GRADIENT_STOPS);
         items[..n].copy_from_slice(&stops[..n]);
-        Self { len: n as u8, items }
+        Self {
+            len: n as u8,
+            items,
+        }
     }
     pub fn as_slice(&self) -> &[ColorStop] {
         &self.items[..self.len as usize]
@@ -349,9 +418,14 @@ impl Stops {
 pub enum Fill {
     Solid(Color),
     /// `angle` in radians: `0` = left to right, `PI/2` = top to bottom.
-    Linear { angle: f32, stops: Stops },
+    Linear {
+        angle: f32,
+        stops: Stops,
+    },
     /// Centered on the node, `t = 1` at the farthest corner.
-    Radial { stops: Stops },
+    Radial {
+        stops: Stops,
+    },
 }
 impl Default for Fill {
     fn default() -> Self {
@@ -366,13 +440,21 @@ impl Fill {
     }
     /// Evenly spaced linear gradient between `colors`.
     pub fn linear(angle: f32, colors: &[Color]) -> Fill {
-        Fill::Linear { angle, stops: even_stops(colors) }
+        Fill::Linear {
+            angle,
+            stops: even_stops(colors),
+        }
     }
     pub fn linear_stops(angle: f32, stops: &[ColorStop]) -> Fill {
-        Fill::Linear { angle, stops: Stops::new(stops) }
+        Fill::Linear {
+            angle,
+            stops: Stops::new(stops),
+        }
     }
     pub fn radial(colors: &[Color]) -> Fill {
-        Fill::Radial { stops: even_stops(colors) }
+        Fill::Radial {
+            stops: even_stops(colors),
+        }
     }
     pub fn is_visible(&self) -> bool {
         match self {
@@ -398,14 +480,28 @@ impl Fill {
         }
         match (self, to) {
             (Self::Solid(a), Self::Solid(b)) => Self::Solid(a.lerp(b, t)),
-            (Self::Linear { angle: a, stops: from }, Self::Linear { angle: b, stops: to }) => {
-                let angle = a + ((b - a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
-                    - std::f32::consts::PI) * t;
-                Self::Linear { angle, stops: interpolate_stops(from, to, t) }
+            (
+                Self::Linear {
+                    angle: a,
+                    stops: from,
+                },
+                Self::Linear {
+                    angle: b,
+                    stops: to,
+                },
+            ) => {
+                let angle = a
+                    + ((b - a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+                        - std::f32::consts::PI)
+                        * t;
+                Self::Linear {
+                    angle,
+                    stops: interpolate_stops(from, to, t),
+                }
             }
-            (Self::Radial { stops: a }, Self::Radial { stops: b }) => {
-                Self::Radial { stops: interpolate_stops(a, b, t) }
-            }
+            (Self::Radial { stops: a }, Self::Radial { stops: b }) => Self::Radial {
+                stops: interpolate_stops(a, b, t),
+            },
             (Self::Solid(c), Self::Linear { angle, stops }) => Self::Linear {
                 angle,
                 stops: interpolate_stops(solid_stops(c, stops), stops, t),
@@ -414,8 +510,10 @@ impl Fill {
                 stops: interpolate_stops(solid_stops(c, stops), stops, t),
             },
             (_, Self::Solid(_)) => to.interpolate(self, 1. - t),
-            (Self::Linear { stops: a, .. } | Self::Radial { stops: a },
-             Self::Linear { stops: b, .. } | Self::Radial { stops: b }) => {
+            (
+                Self::Linear { stops: a, .. } | Self::Radial { stops: a },
+                Self::Linear { stops: b, .. } | Self::Radial { stops: b },
+            ) => {
                 let midpoint = Self::Solid(sample_stops(a, 0.5).lerp(sample_stops(b, 0.5), 0.5));
                 if t < 0.5 {
                     self.interpolate(midpoint, 2. * t)
@@ -455,7 +553,11 @@ fn interpolate_stops(a: Stops, b: Stops, t: f32) -> Stops {
     let len = a.len().max(b.len()).max(1);
     let last = |stops: &Stops, i: usize| {
         let items = stops.as_slice();
-        items.get(i).or_else(|| items.last()).copied().unwrap_or_default()
+        items
+            .get(i)
+            .or_else(|| items.last())
+            .copied()
+            .unwrap_or_default()
     };
     let mut stops = [ColorStop::default(); MAX_GRADIENT_STOPS];
     for (i, stop) in stops[..len].iter_mut().enumerate() {
@@ -474,7 +576,10 @@ fn sample_stops(stops: Stops, t: f32) -> Color {
     for pair in stops.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         if t > a.offset {
-            color = a.color.lerp(b.color, ((t - a.offset) / (b.offset - a.offset).max(0.00001)).clamp(0., 1.));
+            color = a.color.lerp(
+                b.color,
+                ((t - a.offset) / (b.offset - a.offset).max(0.00001)).clamp(0., 1.),
+            );
         }
     }
     color
@@ -483,7 +588,14 @@ fn even_stops(colors: &[Color]) -> Stops {
     let n = colors.len().min(MAX_GRADIENT_STOPS);
     let mut v = [ColorStop::default(); MAX_GRADIENT_STOPS];
     for (i, c) in colors.iter().take(n).enumerate() {
-        v[i] = ColorStop { offset: if n > 1 { i as f32 / (n - 1) as f32 } else { 0.0 }, color: *c };
+        v[i] = ColorStop {
+            offset: if n > 1 {
+                i as f32 / (n - 1) as f32
+            } else {
+                0.0
+            },
+            color: *c,
+        };
     }
     Stops::new(&v[..n])
 }

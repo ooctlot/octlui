@@ -104,7 +104,11 @@ impl Default for Sizing {
 }
 impl Sizing {
     pub const fn new(kind: SizeKind) -> Self {
-        Self { kind, min: 0.0, max: f32::INFINITY }
+        Self {
+            kind,
+            min: 0.0,
+            max: f32::INFINITY,
+        }
     }
     #[must_use]
     pub const fn min(mut self, min: f32) -> Self {
@@ -181,7 +185,10 @@ pub enum TextWrap {
 }
 impl TextWrap {
     pub fn single_line(self) -> bool {
-        matches!(self, TextWrap::None | TextWrap::Clip { .. } | TextWrap::Fade { .. })
+        matches!(
+            self,
+            TextWrap::None | TextWrap::Clip { .. } | TextWrap::Fade { .. }
+        )
     }
 }
 

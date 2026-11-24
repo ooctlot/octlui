@@ -26,8 +26,11 @@ pub fn expand(_attr: TokenStream, item: TokenStream) -> TokenStream {
         Item::Struct(s) => (&mut s.attrs, s.ident.clone(), s.generics.clone()),
         Item::Enum(e) => (&mut e.attrs, e.ident.clone(), e.generics.clone()),
         other => {
-            return syn::Error::new_spanned(other, "`#[octlui::action]` supports structs and enums")
-                .to_compile_error();
+            return syn::Error::new_spanned(
+                other,
+                "`#[octlui::action]` supports structs and enums",
+            )
+            .to_compile_error();
         }
     };
 

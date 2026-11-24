@@ -90,8 +90,16 @@ impl LNode {
     #[inline]
     fn sizing(&self, a: Axis) -> Sizing {
         match a {
-            Axis::X => self.reflow.as_ref().and_then(|r| r.width).map_or(self.width, fixed),
-            Axis::Y => self.reflow.as_ref().and_then(|r| r.height).map_or(self.height, fixed),
+            Axis::X => self
+                .reflow
+                .as_ref()
+                .and_then(|r| r.width)
+                .map_or(self.width, fixed),
+            Axis::Y => self
+                .reflow
+                .as_ref()
+                .and_then(|r| r.height)
+                .map_or(self.height, fixed),
         }
     }
     pub fn padding(&self) -> Padding {
@@ -120,15 +128,37 @@ pub(crate) struct Arena {
 
 fn convert(node: Node, parent: u32, key: u64) -> (LNode, Vec<Node>) {
     let Node {
-        id, width, height, direction, child_align_x, child_align_y, child_gap, mut padding, corner_radius,
-        aspect_ratio, clip, key_context, focusable, appearance, text, image, tooltip, scroll, floating,
-        spring, handlers, children, style_callback,
+        id,
+        width,
+        height,
+        direction,
+        child_align_x,
+        child_align_y,
+        child_gap,
+        mut padding,
+        corner_radius,
+        aspect_ratio,
+        clip,
+        key_context,
+        focusable,
+        appearance,
+        text,
+        image,
+        tooltip,
+        scroll,
+        floating,
+        spring,
+        handlers,
+        children,
+        style_callback,
     } = node;
-    let state_style = style_callback.map(|callback| Box::new(StateStyle {
-        base: appearance.as_deref().cloned().unwrap_or_default(),
-        callback,
-        previous: None,
-    }));
+    let state_style = style_callback.map(|callback| {
+        Box::new(StateStyle {
+            base: appearance.as_deref().cloned().unwrap_or_default(),
+            callback,
+            previous: None,
+        })
+    });
 
     let mut clip = clip;
     if let Some(s) = &scroll {
@@ -216,7 +246,10 @@ impl Arena {
             self.nodes[i].first_child = self.nodes.len() as u32;
             self.nodes[i].child_count = kids.len() as u32;
             for (idx, kid) in kids.into_iter().enumerate() {
-                let key = kid.id.as_ref().map_or_else(|| mix(parent_key, idx as u64 + 1), |i| i.hash);
+                let key = kid
+                    .id
+                    .as_ref()
+                    .map_or_else(|| mix(parent_key, idx as u64 + 1), |i| i.hash);
                 let (mut ln, grand) = convert(kid, i as u32, key);
                 ln.interactive = ln.handlers_or_flags();
                 self.nodes.push(ln);
@@ -230,9 +263,16 @@ impl Arena {
         self.nodes.is_empty()
     }
 
-    pub fn update_state_styles(&mut self, hovered: impl Fn(u64) -> bool, focused: Option<u64>, pressed: Option<u64>) {
+    pub fn update_state_styles(
+        &mut self,
+        hovered: impl Fn(u64) -> bool,
+        focused: Option<u64>,
+        pressed: Option<u64>,
+    ) {
         for node in &mut self.nodes {
-            let Some(style) = &mut node.state_style else { continue };
+            let Some(style) = &mut node.state_style else {
+                continue;
+            };
             let state = InteractionState {
                 hovered: hovered(node.key),
                 focused: focused == Some(node.key),
@@ -292,13 +332,23 @@ fn leaf_content(node: &LNode, axis: Axis, env: &mut LayoutEnv) -> Option<(f32, f
     let pad = node.pad_along(axis);
     if let Some(t) = &node.text {
         if let Some(input) = &t.input {
-            let value = normalize(if t.content.is_empty() { &input.prompt } else { &t.content }, input.multiline);
+            let value = normalize(
+                if t.content.is_empty() {
+                    &input.prompt
+                } else {
+                    &t.content
+                },
+                input.multiline,
+            );
             let width = (axis == Axis::Y).then(|| (node.size.x - node.pad_along(Axis::X)).max(0.0));
             let wrap = input_wrap(t, input);
             let measured = if let Some(shaping) = env.input_text {
                 shaping.layout(&value, t.font, t.size, wrap, width).size
             } else {
-                env.text.measure(&Text::new(value).font(t.font).size(t.size).wrap(wrap), width)
+                env.text.measure(
+                    &Text::new(value).font(t.font).size(t.size).wrap(wrap),
+                    width,
+                )
             };
             let natural = measured.get(axis).max(t.size.max(0.0));
             return Some(match axis {
@@ -339,7 +389,8 @@ fn fit_pass(arena: &mut Arena, axis: Axis, env: &mut LayoutEnv) {
                 Some(v) => v,
                 None => {
                     let main = node.direction.axis() == axis;
-                    let (mut sum, mut msum, mut mx, mut mmx, mut count) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0usize);
+                    let (mut sum, mut msum, mut mx, mut mmx, mut count) =
+                        (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0usize);
                     for c in node.children() {
                         let ch = &arena.nodes[c];
                         if ch.is_floating {
@@ -431,7 +482,13 @@ fn resolve_pass(arena: &mut Arena, axis: Axis, viewport: Vec2) {
         let (range, dir, gap, parent_size, inner) = {
             let n = &arena.nodes[i];
             let size = n.size.get(axis);
-            (n.children(), n.direction, n.gap(), size, (size - n.pad_along(axis)).max(0.0))
+            (
+                n.children(),
+                n.direction,
+                n.gap(),
+                size,
+                (size - n.pad_along(axis)).max(0.0),
+            )
         };
         flow.clear();
         for c in range.clone() {
@@ -450,16 +507,28 @@ fn resolve_pass(arena: &mut Arena, axis: Axis, viewport: Vec2) {
                 }
             }
             let gaps = gap * flow.len().saturating_sub(1) as f32;
-            let used: f32 = flow.iter().map(|&c| arena.nodes[c].size.get(axis)).sum::<f32>() + gaps;
+            let used: f32 = flow
+                .iter()
+                .map(|&c| arena.nodes[c].size.get(axis))
+                .sum::<f32>()
+                + gaps;
             let mut remaining = inner - used;
 
             if remaining > EPS {
                 tmp.clear();
-                tmp.extend(flow.iter().copied().filter(|&c| matches!(arena.nodes[c].sizing(axis).kind, SizeKind::Grow)));
+                tmp.extend(
+                    flow.iter()
+                        .copied()
+                        .filter(|&c| matches!(arena.nodes[c].sizing(axis).kind, SizeKind::Grow)),
+                );
                 grow_smallest_first(arena, axis, &mut tmp, &mut remaining);
             } else if remaining < -EPS {
                 tmp.clear();
-                tmp.extend(flow.iter().copied().filter(|&c| !matches!(arena.nodes[c].sizing(axis).kind, SizeKind::Fixed(_))));
+                tmp.extend(
+                    flow.iter().copied().filter(|&c| {
+                        !matches!(arena.nodes[c].sizing(axis).kind, SizeKind::Fixed(_))
+                    }),
+                );
                 shrink_largest_first(arena, axis, &mut tmp, &mut remaining);
             }
         } else {
@@ -514,7 +583,10 @@ fn grow_smallest_first(arena: &mut Arena, axis: Axis, idx: &mut Vec<usize>, rema
                 second = s;
             }
         }
-        let at_smallest = idx.iter().filter(|&&c| (arena.nodes[c].size.get(axis) - smallest).abs() <= EPS).count();
+        let at_smallest = idx
+            .iter()
+            .filter(|&&c| (arena.nodes[c].size.get(axis) - smallest).abs() <= EPS)
+            .count();
         let step = (second - smallest).min(*remaining / at_smallest as f32);
         for &c in idx.iter() {
             let n = &mut arena.nodes[c];
@@ -551,8 +623,15 @@ fn shrink_largest_first(arena: &mut Arena, axis: Axis, idx: &mut Vec<usize>, rem
                 second = s;
             }
         }
-        let at_largest = idx.iter().filter(|&&c| (arena.nodes[c].size.get(axis) - largest).abs() <= EPS).count();
-        let step = if second.is_finite() { (largest - second).min(-*remaining / at_largest as f32) } else { -*remaining / at_largest as f32 };
+        let at_largest = idx
+            .iter()
+            .filter(|&&c| (arena.nodes[c].size.get(axis) - largest).abs() <= EPS)
+            .count();
+        let step = if second.is_finite() {
+            (largest - second).min(-*remaining / at_largest as f32)
+        } else {
+            -*remaining / at_largest as f32
+        };
         for &c in idx.iter() {
             let n = &mut arena.nodes[c];
             let s = n.size.get(axis);
@@ -581,7 +660,17 @@ pub(crate) fn position(arena: &mut Arena) {
             n.rect.w = n.size.x;
             n.rect.h = n.size.y;
             let axes = n.scroll.as_ref().map_or(Clip::None, |s| s.axes);
-            (n.children(), n.direction, n.gap(), n.align_x, n.align_y, n.padding(), n.rect, axes, n.scroll_offset)
+            (
+                n.children(),
+                n.direction,
+                n.gap(),
+                n.align_x,
+                n.align_y,
+                n.padding(),
+                n.rect,
+                axes,
+                n.scroll_offset,
+            )
         };
         if arena.nodes[i].child_count == 0 {
             arena.nodes[i].content = Vec2::new(pad.horizontal(), pad.vertical());
@@ -612,9 +701,20 @@ pub(crate) fn position(arena: &mut Arena) {
 
         // Scroll offset clamped to the scrollable overflow.
         let mut max_off = Vec2::ZERO;
-        max_off.x = if scroll_axes.x() { (content.x - rect.w).max(0.0) } else { 0.0 };
-        max_off.y = if scroll_axes.y() { (content.y - rect.h).max(0.0) } else { 0.0 };
-        let off = Vec2::new(req_offset.x.clamp(0.0, max_off.x), req_offset.y.clamp(0.0, max_off.y));
+        max_off.x = if scroll_axes.x() {
+            (content.x - rect.w).max(0.0)
+        } else {
+            0.0
+        };
+        max_off.y = if scroll_axes.y() {
+            (content.y - rect.h).max(0.0)
+        } else {
+            0.0
+        };
+        let off = Vec2::new(
+            req_offset.x.clamp(0.0, max_off.x),
+            req_offset.y.clamp(0.0, max_off.y),
+        );
         {
             let n = &mut arena.nodes[i];
             n.content = content;
@@ -623,7 +723,10 @@ pub(crate) fn position(arena: &mut Arena) {
         }
 
         let inner_origin = Vec2::new(rect.x + pad.left, rect.y + pad.top);
-        let inner_size = Vec2::new((rect.w - pad.horizontal()).max(0.0), (rect.h - pad.vertical()).max(0.0));
+        let inner_size = Vec2::new(
+            (rect.w - pad.horizontal()).max(0.0),
+            (rect.h - pad.vertical()).max(0.0),
+        );
         let (align_main, align_cross) = match main {
             Axis::X => (align_x, align_y),
             Axis::Y => (align_y, align_x),
@@ -637,7 +740,10 @@ pub(crate) fn position(arena: &mut Arena) {
             let mut o = Vec2::ZERO;
             o.set(main, cursor);
             let cslack = (inner_size.get(cross) - csz.get(cross)).max(0.0);
-            o.set(cross, inner_origin.get(cross) + cslack * align_cross.factor() - off.get(cross));
+            o.set(
+                cross,
+                inner_origin.get(cross) + cslack * align_cross.factor() - off.get(cross),
+            );
             ch.rect = Rect::from_origin_size(o, csz);
             cursor += csz.get(main) + gap;
         };
@@ -660,9 +766,15 @@ pub(crate) fn position(arena: &mut Arena) {
             if !ch.is_floating {
                 continue;
             }
-            let f = ch.floating.as_ref().expect("floating flag implies component");
+            let f = ch
+                .floating
+                .as_ref()
+                .expect("floating flag implies component");
             let p = rect.anchor_point(f.parent_anchor) + f.offset;
-            let origin = Vec2::new(p.x - ch.size.x * f.anchor.x.factor(), p.y - ch.size.y * f.anchor.y.factor());
+            let origin = Vec2::new(
+                p.x - ch.size.x * f.anchor.x.factor(),
+                p.y - ch.size.y * f.anchor.y.factor(),
+            );
             ch.rect = Rect::from_origin_size(origin, ch.size);
         }
     }
@@ -680,7 +792,15 @@ mod tests {
         a.build(root);
         let mut tm = PlaceholderMeasurer;
         let mut imgs = ImageStore::default();
-        layout(&mut a, Vec2::new(w, h), &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut imgs });
+        layout(
+            &mut a,
+            Vec2::new(w, h),
+            &mut LayoutEnv {
+                text: &mut tm,
+                input_text: None,
+                images: &mut imgs,
+            },
+        );
         a
     }
     fn r(a: &Arena, i: usize) -> Rect {
@@ -690,7 +810,10 @@ mod tests {
     #[test]
     fn row_fixed_and_grow() {
         let a = run(
-            node().size(grow(), grow()).child(node().size(fixed(100.0), fixed(50.0))).child(node().size(grow(), grow())),
+            node()
+                .size(grow(), grow())
+                .child(node().size(fixed(100.0), fixed(50.0)))
+                .child(node().size(grow(), grow())),
             400.0,
             300.0,
         );
@@ -718,7 +841,10 @@ mod tests {
     #[test]
     fn column_gap_padding_fit() {
         let a = run(
-            node().column().padding(10.0).child_gap(5.0)
+            node()
+                .column()
+                .padding(10.0)
+                .child_gap(5.0)
                 .child(node().size(fixed(40.0), fixed(20.0)))
                 .child(node().size(fixed(60.0), fixed(30.0))),
             500.0,
@@ -732,13 +858,21 @@ mod tests {
     #[test]
     fn alignment_center_and_end() {
         let a = run(
-            node().size(fixed(100.0), fixed(100.0)).center().child(node().size(fixed(20.0), fixed(20.0))),
-            200.0, 200.0,
+            node()
+                .size(fixed(100.0), fixed(100.0))
+                .center()
+                .child(node().size(fixed(20.0), fixed(20.0))),
+            200.0,
+            200.0,
         );
         assert_eq!(r(&a, 1), Rect::new(40.0, 40.0, 20.0, 20.0));
         let a = run(
-            node().size(fixed(100.0), fixed(100.0)).align(Align::End, Align::End).child(node().size(fixed(20.0), fixed(20.0))),
-            200.0, 200.0,
+            node()
+                .size(fixed(100.0), fixed(100.0))
+                .align(Align::End, Align::End)
+                .child(node().size(fixed(20.0), fixed(20.0))),
+            200.0,
+            200.0,
         );
         assert_eq!(r(&a, 1), Rect::new(80.0, 80.0, 20.0, 20.0));
     }
@@ -746,10 +880,13 @@ mod tests {
     #[test]
     fn reversed_direction() {
         let a = run(
-            node().size(fixed(100.0), fixed(10.0)).direction(Direction::RightToLeft)
+            node()
+                .size(fixed(100.0), fixed(10.0))
+                .direction(Direction::RightToLeft)
                 .child(node().size(fixed(10.0), fixed(10.0)))
                 .child(node().size(fixed(20.0), fixed(10.0))),
-            200.0, 200.0,
+            200.0,
+            200.0,
         );
         assert_eq!(r(&a, 2).x, 0.0);
         assert_eq!(r(&a, 1).x, 20.0);
@@ -758,9 +895,12 @@ mod tests {
     #[test]
     fn fraction_sizes() {
         let a = run(
-            node().size(fixed(200.0), fixed(100.0)).padding(10.0)
+            node()
+                .size(fixed(200.0), fixed(100.0))
+                .padding(10.0)
                 .child(node().width(fraction(0.5)).height(fraction(1.0))),
-            400.0, 400.0,
+            400.0,
+            400.0,
         );
         assert_eq!((r(&a, 1).w, r(&a, 1).h), (90.0, 80.0));
     }
@@ -769,10 +909,17 @@ mod tests {
     fn shrink_to_min() {
         // Two Grow children with min widths in a too-small parent shrink to their minimums.
         let a = run(
-            node().size(fixed(100.0), fixed(10.0))
+            node()
+                .size(fixed(100.0), fixed(10.0))
                 .child(node().width(fixed(80.0)).height(fixed(10.0)))
-                .child(node().width(grow().min(30.0)).height(fixed(10.0)).child(node().size(fixed(60.0), fixed(10.0)))),
-            400.0, 400.0,
+                .child(
+                    node()
+                        .width(grow().min(30.0))
+                        .height(fixed(10.0))
+                        .child(node().size(fixed(60.0), fixed(10.0))),
+                ),
+            400.0,
+            400.0,
         );
         assert_eq!(r(&a, 1).w, 80.0);
         assert!(r(&a, 2).w >= 30.0);
@@ -780,16 +927,31 @@ mod tests {
 
     #[test]
     fn aspect_ratio_from_width() {
-        let a = run(node().width(fixed(160.0)).aspect_ratio(16.0 / 9.0), 400.0, 400.0);
+        let a = run(
+            node().width(fixed(160.0)).aspect_ratio(16.0 / 9.0),
+            400.0,
+            400.0,
+        );
         assert!((r(&a, 0).h - 90.0).abs() < 0.01);
-        let a = run(node().height(fixed(90.0)).aspect_ratio(16.0 / 9.0), 400.0, 400.0);
+        let a = run(
+            node().height(fixed(90.0)).aspect_ratio(16.0 / 9.0),
+            400.0,
+            400.0,
+        );
         assert!((r(&a, 0).w - 160.0).abs() < 0.01);
     }
 
     #[test]
     fn text_wraps_and_grows_height() {
         let t = Text::new("aaaa bbbb cccc dddd").size(10.0); // glyph 5.5, line 12
-        let a = run(node().column().width(fixed(50.0)).child(node().width(grow()).text(t)), 400.0, 400.0);
+        let a = run(
+            node()
+                .column()
+                .width(fixed(50.0))
+                .child(node().width(grow()).text(t)),
+            400.0,
+            400.0,
+        );
         // 9 columns per line -> "aaaa bbbb" / "cccc dddd" = 2 lines
         assert_eq!(r(&a, 1).h, 24.0);
         assert_eq!(r(&a, 0).h, 24.0);
@@ -797,22 +959,35 @@ mod tests {
 
     #[test]
     fn text_clip_can_shrink() {
-        let t = Text::new("a very long single line of text").size(10.0).wrap(TextWrap::Clip { ellipsis: true });
-        let a = run(node().width(fixed(40.0)).child(node().width(grow()).text(t)), 400.0, 400.0);
+        let t = Text::new("a very long single line of text")
+            .size(10.0)
+            .wrap(TextWrap::Clip { ellipsis: true });
+        let a = run(
+            node()
+                .width(fixed(40.0))
+                .child(node().width(grow()).text(t)),
+            400.0,
+            400.0,
+        );
         assert_eq!(r(&a, 1).w, 40.0);
     }
 
     #[test]
     fn floating_does_not_affect_flow() {
         let a = run(
-            node().size(fixed(100.0), fixed(100.0))
+            node()
+                .size(fixed(100.0), fixed(100.0))
                 .child(node().size(fixed(10.0), fixed(10.0)))
                 .child(
                     node().size(fixed(30.0), fixed(20.0)).floating(
-                        Floating::floating().parent_anchor(Anchor::BOTTOM_RIGHT).anchor(Anchor::TOP_RIGHT).offset(Vec2::new(0.0, 4.0)),
+                        Floating::floating()
+                            .parent_anchor(Anchor::BOTTOM_RIGHT)
+                            .anchor(Anchor::TOP_RIGHT)
+                            .offset(Vec2::new(0.0, 4.0)),
                     ),
                 ),
-            200.0, 200.0,
+            200.0,
+            200.0,
         );
         assert_eq!(r(&a, 2), Rect::new(70.0, 104.0, 30.0, 20.0));
         assert_eq!(a.nodes[2].is_floating, true);
@@ -822,13 +997,24 @@ mod tests {
     fn scroll_content_and_offset_clamp() {
         let mut a = Arena::default();
         a.build(
-            node().column().size(fixed(100.0), fixed(100.0)).scroll(Scroll::scroll())
+            node()
+                .column()
+                .size(fixed(100.0), fixed(100.0))
+                .scroll(Scroll::scroll())
                 .child(node().size(fixed(100.0), fixed(300.0))),
         );
         a.nodes[0].scroll_offset = Vec2::new(0.0, 500.0);
         let mut tm = PlaceholderMeasurer;
         let mut imgs = ImageStore::default();
-        layout(&mut a, Vec2::new(400.0, 400.0), &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut imgs });
+        layout(
+            &mut a,
+            Vec2::new(400.0, 400.0),
+            &mut LayoutEnv {
+                text: &mut tm,
+                input_text: None,
+                images: &mut imgs,
+            },
+        );
         assert_eq!(a.nodes[0].scroll_max, Vec2::new(0.0, 200.0));
         assert_eq!(a.nodes[0].scroll_offset.y, 200.0);
         assert_eq!(a.nodes[1].rect.y, -200.0);
@@ -837,9 +1023,15 @@ mod tests {
     #[test]
     fn scrollbar_reserves_space() {
         let a = run(
-            node().size(fixed(100.0), fixed(100.0)).scroll(Scroll::scroll().scroll_bar(ScrollBar::scroll_bar().reserve_space(true).thickness(10.0)))
+            node()
+                .size(fixed(100.0), fixed(100.0))
+                .scroll(
+                    Scroll::scroll()
+                        .scroll_bar(ScrollBar::scroll_bar().reserve_space(true).thickness(10.0)),
+                )
                 .child(node().width(grow()).height(fixed(10.0))),
-            400.0, 400.0,
+            400.0,
+            400.0,
         );
         assert_eq!(r(&a, 1).w, 90.0);
     }
@@ -847,7 +1039,11 @@ mod tests {
     #[test]
     fn many_nodes_are_contiguous() {
         let kids: Vec<Node> = (0..1000).map(|_| node().size(grow(), fixed(1.0))).collect();
-        let a = run(node().column().size(grow(), grow()).children(kids), 100.0, 5000.0);
+        let a = run(
+            node().column().size(grow(), grow()).children(kids),
+            100.0,
+            5000.0,
+        );
         assert_eq!(a.nodes[0].child_count, 1000);
         assert_eq!(r(&a, 1000).y, 999.0);
     }

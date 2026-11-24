@@ -315,11 +315,12 @@ impl NativeText {
             } else {
                 remaining
             };
-            let start = area.x + if input {
-                crate::text_input::input_line_x(area.w, width, run.align)
-            } else {
-                run.align.factor() * offset
-            };
+            let start = area.x
+                + if input {
+                    crate::text_input::input_line_x(area.w, width, run.align)
+                } else {
+                    run.align.factor() * offset
+                };
             let fade = match run.wrap {
                 TextWrap::Fade { length } if remaining < 0. => length.max(0.),
                 _ => 0.,
@@ -343,7 +344,11 @@ impl NativeText {
                 },
             ));
         };
-        let shaped = if input { Some(&self.input_text) } else { self.shaped.as_ref() };
+        let shaped = if input {
+            Some(&self.input_text)
+        } else {
+            self.shaped.as_ref()
+        };
         if let Some(shaped) = shaped {
             let lines = shaped.layout(&run.content, run.font, run.size, run.wrap, Some(area.w));
             for line in &lines.lines {
