@@ -171,7 +171,7 @@ impl GlyphCache {
 
 #[derive(Default)]
 pub(super) struct NativeText {
-    fonts: NativeTextMeasurer,
+    pub(super) fonts: NativeTextMeasurer,
     cache: GlyphCache,
 }
 
@@ -222,7 +222,7 @@ impl NativeText {
                 _ => 0.,
             };
             for &(id, x) in &line.glyphs {
-                let key = (run.font, id, px.to_bits());
+                let key = (face.id, id, px.to_bits());
                 let entry = match self.cache.entries.get(&key) {
                     Some(entry) => *entry,
                     None => {

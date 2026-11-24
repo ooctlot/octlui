@@ -244,6 +244,10 @@ impl Renderer {
         self.format
     }
 
+    pub(crate) fn set_native_fonts(&mut self, fonts: crate::text::NativeTextMeasurer) {
+        self.native.fonts = fonts;
+    }
+
     /// Installs a text renderer (see [`TextRenderer`]).
     pub fn set_text_renderer(&mut self, t: Box<dyn TextRenderer>) {
         self.text = Some(t);

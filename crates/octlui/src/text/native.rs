@@ -3,14 +3,39 @@ use crate::components::{FontId, Text};
 use crate::geometry::Vec2;
 use crate::style::TextWrap;
 use font_kit::{family_name::FamilyName, font::Font, properties::Properties, source::SystemSource};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+#[derive(Clone, Default)]
+pub(crate) struct Fonts(Rc<RefCell<Vec<Font>>>);
+
+impl Fonts {
+    pub(crate) fn insert(&self, font: Font) -> FontId {
+        let mut fonts = self.0.borrow_mut();
+        let id = FontId(u32::try_from(fonts.len() + 3).expect("too many registered fonts"));
+        fonts.push(font);
+        id
+    }
+
+    fn contains(&self, id: FontId) -> bool {
+        ((id.0 - 3) as usize) < self.0.borrow().len()
+    }
+
+    fn get(&self, id: FontId) -> Option<Font> {
+        self.0.borrow().get(id.0.checked_sub(3)? as usize).cloned()
+    }
+}
 
 #[derive(Default)]
 pub struct NativeTextMeasurer {
     faces: HashMap<FontId, Option<Face>>,
+    fonts: Fonts,
+    default_font: FontId,
 }
 
 pub(crate) struct Face {
+    pub id: FontId,
     pub font: Font,
     advances: HashMap<char, (u32, f32)>,
 }
@@ -29,21 +54,42 @@ pub(crate) struct Layout {
 }
 
 impl NativeTextMeasurer {
+    pub(crate) fn with_fonts(fonts: Fonts, default_font: FontId) -> Self {
+        Self {
+            fonts,
+            default_font,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn face(&mut self, id: FontId) -> Option<&mut Face> {
-        let (id, family) = match id {
-            FontId::SERIF => (id, FamilyName::Serif),
-            FontId::MONOSPACE => (id, FamilyName::Monospace),
-            _ => (FontId::DEFAULT, FamilyName::SansSerif),
+        let id = if id == FontId::DEFAULT {
+            self.default_font
+        } else {
+            id
+        };
+        let id = if id.0 < 3 || self.fonts.contains(id) {
+            id
+        } else {
+            FontId::DEFAULT
+        };
+        let family = match id {
+            FontId::SERIF => FamilyName::Serif,
+            FontId::MONOSPACE => FamilyName::Monospace,
+            _ => FamilyName::SansSerif,
         };
         self.faces
             .entry(id)
             .or_insert_with(|| {
-                let font = SystemSource::new()
-                    .select_best_match(&[family], &Properties::new())
-                    .ok()?
-                    .load()
-                    .ok()?;
+                let font = self.fonts.get(id).or_else(|| {
+                    SystemSource::new()
+                        .select_best_match(&[family], &Properties::new())
+                        .ok()?
+                        .load()
+                        .ok()
+                })?;
                 Some(Face {
+                    id,
                     font,
                     advances: HashMap::new(),
                 })

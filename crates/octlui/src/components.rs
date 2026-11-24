@@ -21,7 +21,7 @@ pub struct Appearance {
     pub border_width: f32,
 }
 
-/// Font family handle. Unknown handles use the default system sans-serif family.
+/// Font handle. Use a built-in family or load a face through `AppContext`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct FontId(pub u32);
 impl FontId {

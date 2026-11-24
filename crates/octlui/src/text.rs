@@ -1,7 +1,34 @@
 //! Text measurement and line layout.
 
 mod native;
+pub use font_kit::error::FontLoadingError;
 pub use native::NativeTextMeasurer;
+pub(crate) use native::Fonts;
+
+/// Failure to find or open an installed font.
+#[derive(Debug)]
+pub enum SystemFontError {
+    Selection(font_kit::error::SelectionError),
+    Loading(FontLoadingError),
+}
+
+impl std::fmt::Display for SystemFontError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Selection(error) => error.fmt(f),
+            Self::Loading(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SystemFontError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Selection(error) => Some(error),
+            Self::Loading(error) => Some(error),
+        }
+    }
+}
 
 use crate::components::Text;
 use crate::geometry::Vec2;

@@ -1,6 +1,7 @@
 //! Application entry point, windows and the winit event loop.
 
 use crate::action::{Action, Event, Key, Keymap, KeyBinding, Modifiers};
+use crate::components::FontId;
 use crate::ctx::{Context, Effect, WindowInfo};
 use crate::events::MouseButton;
 use crate::geometry::{Color, Vec2};
@@ -8,11 +9,12 @@ use crate::image::ImageStore;
 use crate::layout::LayoutEnv;
 use crate::node::Node;
 use crate::render::{GpuContext, Renderer, TextRenderer};
-use crate::text::{NativeTextMeasurer, TextMeasurer};
+use crate::text::{FontLoadingError, Fonts, NativeTextMeasurer, SystemFontError, TextMeasurer};
+use font_kit::{family_name::FamilyName, font::Font, properties::Properties, source::SystemSource};
 use crate::ui::{Env, Ui};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -69,7 +71,9 @@ pub struct AppContext {
     pending: Vec<Box<dyn PendingWindow>>,
     globals: Vec<(TypeId, GlobalHandler)>,
     quit: bool,
-    measurer: TextMeasurerFactory,
+    measurer: Option<TextMeasurerFactory>,
+    fonts: Fonts,
+    default_font: FontId,
     text_renderer: Option<TextRendererFactory>,
 }
 
@@ -81,7 +85,9 @@ impl AppContext {
             pending: Vec::new(),
             globals: Vec::new(),
             quit: false,
-            measurer: Box::new(|| Box::new(NativeTextMeasurer::default())),
+            measurer: None,
+            fonts: Fonts::default(),
+            default_font: FontId::DEFAULT,
             text_renderer: None,
         }
     }
@@ -110,9 +116,31 @@ impl AppContext {
         &mut self.images
     }
 
+    /// Loads the first face of a TrueType (.ttf) or OpenType (.otf) file.
+    /// Use the returned ID with `Text::font` or `set_default_font`.
+    pub fn load_font(&mut self, path: impl AsRef<Path>) -> Result<FontId, FontLoadingError> {
+        Font::from_path(path, 0).map(|font| self.fonts.insert(font))
+    }
+
+    /// Loads an installed face by PostScript name, or the regular face of a named family.
+    pub fn load_system_font(&mut self, name: &str) -> Result<FontId, SystemFontError> {
+        let source = SystemSource::new();
+        let handle = source.select_by_postscript_name(name).or_else(|_| {
+            source.select_best_match(&[FamilyName::Title(name.to_owned())], &Properties::new())
+        }).map_err(SystemFontError::Selection)?;
+        let font = handle.load().map_err(SystemFontError::Loading)?;
+        Ok(self.fonts.insert(font))
+    }
+
+    /// Sets the face used for `FontId::DEFAULT` by the built-in text backend in new windows.
+    /// Pass `FontId::DEFAULT` to restore the system sans-serif face.
+    pub fn set_default_font(&mut self, font: FontId) {
+        self.default_font = font;
+    }
+
     /// Replaces the text measurer used by new windows (real text shaping plugs in here).
     pub fn set_text_measurer(&mut self, f: impl Fn() -> Box<dyn TextMeasurer> + 'static) {
-        self.measurer = Box::new(f);
+        self.measurer = Some(Box::new(f));
     }
     /// Replaces the text renderer used by new windows.
     pub fn set_text_renderer(&mut self, f: impl Fn() -> Box<dyn TextRenderer> + 'static) {
@@ -232,6 +260,7 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
         surface.configure(&gpu_ctx.device, &config);
 
         let mut renderer = Renderer::new(&gpu_ctx, config.format);
+        renderer.set_native_fonts(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font));
         if let Some(factory) = &app.text_renderer { renderer.set_text_renderer(factory()); }
 
         let mut ui = Ui::new();
@@ -251,7 +280,10 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
             state: self.state,
             cx,
             view: self.view,
-            measurer: (app.measurer)(),
+            measurer: match &app.measurer {
+                Some(factory) => factory(),
+                None => Box::new(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font)),
+            },
             clear: self.options.clear_color,
             dirty: true,
             last_frame: Instant::now(),
@@ -685,6 +717,28 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn loaded_fonts_resolve_as_default_and_explicit_faces() {
+        let source = SystemSource::new();
+        let Ok(handle) = source.select_best_match(&[FamilyName::Monospace], &Properties::new()) else {
+            return;
+        };
+        let font = handle.load().unwrap();
+        let name = font.postscript_name().unwrap_or_else(|| font.family_name());
+        let mut app = AppContext::new();
+        let system = app.load_system_font(&name).unwrap();
+        let selected = match handle {
+            font_kit::handle::Handle::Path { path, font_index: 0 } => app.load_font(path).unwrap(),
+            _ => system,
+        };
+        app.set_default_font(selected);
+        let mut measurer = NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font);
+        let face = measurer.face(FontId::DEFAULT).unwrap();
+        assert_eq!(face.id, selected);
+        assert_eq!(face.font.postscript_name(), font.postscript_name());
+        assert_eq!(measurer.face(system).unwrap().id, system);
+    }
+
     #[test]
     fn uris() {
         assert_eq!(uri_to_path("file:///home/a%20b/c.png"), Some(PathBuf::from("/home/a b/c.png")));

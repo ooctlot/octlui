@@ -139,6 +139,17 @@ view() -> Node tree
 
 Windowed and headless renderers use the system sans-serif font by default. Use
 `components::FontId::SERIF` or `MONOSPACE` to select another system family.
+In the application setup callback, load a local font or look up an installed font
+by family or PostScript name. Pass the returned ID to `Text::font` to select it for
+one node, or set the default before opening a window:
+
+```rust,ignore
+let body = acx.load_font("assets/Body.otf").expect("load body font");
+acx.set_default_font(body);
+let heading = acx.load_system_font("Georgia").unwrap_or(body);
+let title = octlui::components::Text::new("Settings").font(heading);
+```
+
 Layout uses the selected face's advances and line metrics in logical pixels.
 The renderer rasterizes glyphs at the window's physical scale through DirectWrite
 on Windows, Core Graphics on macOS, and FreeType on Linux. Coverage masks stay in
