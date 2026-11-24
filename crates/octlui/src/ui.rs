@@ -1101,6 +1101,23 @@ mod tests {
     }
 
     #[test]
+    fn grow_scroll_viewport_shrinks_below_its_list_and_reaches_the_last_item() {
+        let mut h = Harness::new(|_| {
+            node().column().size(220., 100.)
+                .child(node().height(25.))
+                .child(node().id("sidebar").column().fill_parent()
+                    .scroll(Scroll::scroll().smooth(false))
+                    .children((0..12).map(|i| node().height(20.).text(format!("Page {i}")))))
+        });
+        assert_eq!(h.ui.arena.nodes[2].rect.h, 75.);
+        h.mv(10., 50.);
+        assert!(h.ui.wheel(Vec2::new(0., -1000.)));
+        h.frame(0.016);
+        assert_eq!(h.ui.arena.nodes[2].scroll_offset.y, 165.);
+        assert_eq!(h.ui.arena.nodes.last().unwrap().rect.bottom(), 100.);
+    }
+
+    #[test]
     fn wheel_scrolls_and_clamps() {
         let mut h = Harness::new(|_| scroller(false, false));
         h.mv(10.0, 10.0);

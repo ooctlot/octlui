@@ -7,7 +7,7 @@ use octlui::{
 };
 
 pub(crate) const CATEGORY: &str = "Rendering";
-pub(crate) const TITLE: &str = "Paint and borders";
+pub(crate) const TITLE: &str = "Background fills";
 
 pub(crate) fn view(_: &mut Gallery, _: &mut Cx) -> Node {
     let colors = [
@@ -15,19 +15,19 @@ pub(crate) fn view(_: &mut Gallery, _: &mut Cx) -> Node {
         Color::hex(0x78b5ae),
         Color::hex(0x396b7c),
     ];
-    let swatch = |name, fill, corners| {
+    let swatch = |name, fill| {
         node()
             .size(grow(), 145.)
             .center()
-            .corner_radius(corners)
+            .corner_radius(8.)
             .background(fill)
-            .border(Fill::linear(1.4, &colors), 4.)
             .child(label(name, 18., INK).width(fit()))
     };
-    page("Apply solid, linear, and radial fills to backgrounds, borders, text, and image tints.")
-        .child(card("Fills").child(row().children([
-            swatch("Solid", Fill::solid(0xc3e3da), [12.; 4]),
-            swatch("Linear", Fill::linear(0.5, &colors), [22., 4., 22., 4.]),
-            swatch("Radial", Fill::radial(&colors), [24.; 4]),
-        ])))
+    page("Compare a solid background with linear and radial gradients.").child(card("Fills").child(
+        row().children([
+            swatch("Solid", Fill::solid(0xc3e3da)),
+            swatch("Linear", Fill::linear(0.5, &colors)),
+            swatch("Radial", Fill::radial(&colors)),
+        ]),
+    ))
 }

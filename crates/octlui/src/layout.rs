@@ -315,6 +315,12 @@ fn fit_pass(arena: &mut Arena, axis: Axis, env: &mut LayoutEnv) {
                 }
                 _ => {
                     let size = sizing.clamp(content);
+                    // A scroll viewport can shrink independently of the content it exposes.
+                    let scrolls = node.scroll.as_ref().is_some_and(|s| match axis {
+                        Axis::X => s.axes.x(),
+                        Axis::Y => s.axes.y(),
+                    });
+                    let min_content = if scrolls { pad } else { min_content };
                     let min = sizing.min.max(min_content).min(size);
                     (size, min)
                 }

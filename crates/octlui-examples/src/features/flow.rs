@@ -2,7 +2,7 @@ use crate::{Cx, Gallery, ui::*};
 use octlui::{Node, node, style::*};
 
 pub(crate) const CATEGORY: &str = "Layout";
-pub(crate) const TITLE: &str = "Flow and alignment";
+pub(crate) const TITLE: &str = "Flow direction";
 
 pub(crate) fn view(state: &mut Gallery, cx: &mut Cx) -> Node {
     let (direction, name) = [
@@ -11,22 +11,13 @@ pub(crate) fn view(state: &mut Gallery, cx: &mut Cx) -> Node {
         (Direction::TopToBottom, "Top to bottom"),
         (Direction::BottomToTop, "Bottom to top"),
     ][state.direction];
-    let (align, align_name) = [
-        (Align::Start, "Start"),
-        (Align::Center, "Center"),
-        (Align::End, "End"),
-    ][state.align];
-    page("Change the flow and alignment. Start and End refer to the physical edges.")
-        .child(row().children([
-            control(name, cx, |s| s.direction = (s.direction + 1) % 4),
-            control(align_name, cx, |s| s.align = (s.align + 1) % 3),
-        ]))
+    page("Cycle through the four directions to see where the first, second and third children appear.")
+        .child(control(name, cx, |s| s.direction = (s.direction + 1) % 4))
         .child(
             card("Children in declaration order").child(
                 node()
                     .size(grow(), 210.)
                     .padding(10.)
-                    .align(align, align)
                     .child_gap(10.)
                     .direction(direction)
                     .background(0xe5efed)

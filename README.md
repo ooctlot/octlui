@@ -53,9 +53,11 @@ cargo run -p octlui --example counter
 cargo run -p octlui --example showcase
 ```
 
-The examples crate opens a 12-page gallery and an independent counter window. Press Esc to
-close the focused window. The gallery covers dimensions, flow, clipping, paint, Unicode text,
-images, actions, file drops, overlays, nested scrolling, springs, and builders.
+The examples crate opens a feature gallery and an independent counter window. Scroll the
+sidebar or drag its thumb to browse pages. Press Esc to close the focused window.
+Text shaping, wrapping, fonts and alignment have separate pages, as do floating overlays,
+tooltips, image loading, image fit and image tint. The Motion section has a page for each
+spring property.
 
 To add a gallery page, put a Rust file in `crates/octlui-examples/src/features` with
 `CATEGORY`, `TITLE`, and `view(state: &mut Gallery, cx: &mut Cx) -> Node`. The build script

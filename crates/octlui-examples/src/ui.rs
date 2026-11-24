@@ -1,7 +1,15 @@
 use crate::{Cx, Gallery};
 use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
 use octlui::components::Text;
-use octlui::{Node, components::ScrollBar, events::ClickEvent, node, style::*};
+use octlui::{
+    Node,
+    components::{Image, ScrollBar},
+    events::ClickEvent,
+    geometry::Fill,
+    image::ImageId,
+    node,
+    style::*,
+};
 
 pub(crate) const PAPER: u32 = 0xf1f5f4;
 pub(crate) const CARD: u32 = 0xfcfdfd;
@@ -69,6 +77,18 @@ pub(crate) fn control(text: &str, cx: &Cx, change: impl Fn(&mut Gallery) + 'stat
 
 pub(crate) fn bar() -> ScrollBar {
     ScrollBar::scroll_bar().thickness(7.).bar_color(0x719991)
+}
+
+pub(crate) fn image_preview(id: Option<ImageId>, mode: ImageFit, tint: Fill) -> Node {
+    let preview = node()
+        .size(grow(), 132.)
+        .corner_radius(8.)
+        .background(0xe5efed);
+    if let Some(id) = id {
+        preview.image(Image::new(id).fit(mode).tint(tint))
+    } else {
+        preview.child(note("Image unavailable"))
+    }
 }
 
 pub(crate) fn demo_png(alternate: bool) -> std::io::Result<Vec<u8>> {

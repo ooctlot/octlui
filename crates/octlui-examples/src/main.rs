@@ -2,6 +2,7 @@ use octlui::{components::*, geometry::Vec2, image::ImageId, style::*, *};
 use std::path::PathBuf;
 use ui::*;
 
+mod spring_demo;
 mod ui;
 
 type Cx = Context<Gallery>;
@@ -18,6 +19,7 @@ include!(concat!(env!("OUT_DIR"), "/features.rs"));
 const CATEGORIES: &[&str] = &[
     "Layout",
     "Rendering",
+    "Text",
     "Interaction",
     "Motion",
     "Application",
@@ -45,6 +47,12 @@ struct Gallery {
     no_smooth: bool,
     spring_step: usize,
     bouncy: bool,
+    tooltip_slow: bool,
+    hovering: bool,
+    presses: usize,
+    last_key: Option<Key>,
+    child_actions: usize,
+    parent_actions: usize,
     count: i32,
     drop_paths: Vec<PathBuf>,
     image: Option<ImageId>,
@@ -58,11 +66,12 @@ fn gallery(state: &mut Gallery, cx: &mut Cx) -> Node {
         .find(|page| page.id == state.selected)
         .unwrap_or(&FEATURES[0]);
     let mut links = node()
+        .id("gallery-sidebar")
         .column()
         .width(grow())
         .height(grow())
         .child_gap(14.)
-        .scroll(Scroll::scroll());
+        .scroll(Scroll::scroll().scroll_bar(bar().always_visible(true).reserve_space(true)));
     for &category in CATEGORIES {
         let pages = FEATURES.iter().filter(|page| page.category == category);
         let group = node()
