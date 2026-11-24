@@ -71,7 +71,7 @@ fn gallery(state: &mut Gallery, cx: &mut Cx) -> Node {
         .width(grow())
         .height(grow())
         .child_gap(14.)
-        .scroll(Scroll::scroll().scroll_bar(bar().always_visible(true).reserve_space(true)));
+        .scroll(Scroll::scroll().scroll_bar(bar().always_visible(false).reserve_space(true)));
     for &category in CATEGORIES {
         let pages = FEATURES.iter().filter(|page| page.category == category);
         let group = node()
