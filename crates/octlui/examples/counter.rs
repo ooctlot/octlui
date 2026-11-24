@@ -72,7 +72,7 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
             node()
                 .row()
                 .child_gap(16.0)
-                .child(button("−1", 0xf38ba8, 0x181825).on_click_action(Change { amount: -1 }))
+                .child(button("-1", 0xf38ba8, 0x181825).on_click_action(Change { amount: -1 }))
                 .child(button("+1", 0xa6e3a1, 0x181825).on_click(cx.listener(on_click_increment)))
                 .child(button("Reset", 0x585b70, 0xffffff).on_click_action(Reset)),
         )
