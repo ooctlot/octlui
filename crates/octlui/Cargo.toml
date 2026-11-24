@@ -1,0 +1,18 @@
+[package]
+name = "octlui"
+description = "A retained-mode, GPU-rendered UI library with a gpui-inspired API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+octlui-macros.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
