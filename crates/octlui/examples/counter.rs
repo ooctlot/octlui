@@ -1,4 +1,3 @@
-//! The counter from the design sketch: actions, key bindings, listeners.
 //! `cargo run --example counter` — press R to reset, Up/Down to change, click the buttons.
 //! The counter displays its value above the bar.
 
