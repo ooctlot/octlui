@@ -1,6 +1,7 @@
 use crate::{Cx, Gallery};
 use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
 use octlui::components::Text;
+use octlui::widgets::button_style;
 use octlui::{
     Node,
     components::{Image, ScrollBar},
@@ -54,10 +55,12 @@ pub(crate) fn row() -> Node {
 }
 
 pub(crate) fn button(text: impl Into<std::sync::Arc<str>>) -> Node {
-    octlui::widgets::button(Text::new(text).size(14.).color(INK).wrap(TextWrap::None))
+    node()
+        .text(Text::new(text).size(14.).color(INK).wrap(TextWrap::None))
         .padding((12., 8.))
         .corner_radius(6.)
         .background(0xc3e3da)
+        .style_when(button_style)
 }
 
 pub(crate) fn control(text: &str, cx: &Cx, change: impl Fn(&mut Gallery) + 'static) -> Node {
