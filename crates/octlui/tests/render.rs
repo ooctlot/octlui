@@ -118,3 +118,31 @@ fn many_quads_render() {
     let shot = r.render(node().size(fixed(200.0), fixed(200.0)).row().children(cells));
     assert!(close(shot.pixel(0, 0), [255, 255, 255], 1));
 }
+
+#[test]
+fn cached_native_glyphs_draw_inside_text_clip() {
+    let Some(mut r) = renderer(96, 40) else { return };
+    let shot = r.render(node().size(fixed(48.), fixed(40.)).text(
+        components::Text::new("MMMMMMMM").size(24.).color(0xffffff).wrap(TextWrap::Clip { ellipsis: false })
+    ));
+    assert!((0..40).any(|y| (0..48).any(|x| shot.pixel(x,y)[0] > 128)));
+    assert!((0..40).all(|y| (48..96).all(|x| shot.pixel(x,y)[0] == 0)));
+    assert_eq!(shot.rgba, r.read_pixels().rgba);
+}
+
+#[test]
+fn zero_width_fraction_has_no_antialiasing_fringe() {
+    let Some(mut r) = renderer(401, 40) else { return };
+    let track = || node().size(fixed(400.5), fixed(24.0)).background(0x313244).clip(Clip::X);
+    let root = || node().size(grow(), grow()).center();
+    let empty = r.render(root().child(track()));
+    let with_fill = r.render(root().child(track().child(
+        node()
+            .width(fraction(0.0))
+            .height(grow())
+            .background(0xffffff)
+            .spring(components::Spring::new(components::SpringProps::SIZE)),
+    )));
+    // The left edge is at x = 0.25, within the AA fringe of the first pixel center.
+    assert!(with_fill.rgba == empty.rgba, "a zero-width fill changed the track pixels");
+}

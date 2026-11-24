@@ -1,10 +1,11 @@
-//! The counter from the design sketch: actions, key bindings, listeners.
 //! `cargo run --example counter` — press R to reset, Up/Down to change, click the buttons.
-//! The value is shown as the width of a bar until text rendering lands.
+//! The counter displays its value above the bar.
 
 use octlui::geometry::*;
 use octlui::style::*;
 use octlui::*;
+
+const MAX_COUNT: i32 = 50;
 
 struct State {
     value: i32,
@@ -24,21 +25,23 @@ fn reset(state: &mut State, cx: &mut Context<State>, _: Reset) {
 }
 
 fn change(state: &mut State, cx: &mut Context<State>, action: &Change) {
-    state.value = (state.value + action.amount).clamp(0, 40);
+    state.value = (state.value + action.amount).clamp(0, MAX_COUNT);
     cx.notify();
 }
 
 fn on_click_increment(state: &mut State, cx: &mut Context<State>, _: &events::ClickEvent) {
-    state.value = (state.value + 1).clamp(0, 40);
+    state.value = (state.value + 1).clamp(0, MAX_COUNT);
     cx.notify();
 }
 
 fn view(state: &mut State, cx: &mut Context<State>) -> Node {
-    let button = |color: u32| {
+    let button = |label: &str, color: u32, ink: u32| {
         node()
-            .size(fixed(64.0), fixed(64.0))
+            .size(fixed(80.0), fixed(48.0))
             .corner_radius(16.0)
             .background(color)
+            .center()
+            .child(node().text(components::Text::new(label).color(ink)))
             .spring(components::Spring::new(components::SpringProps::BACKGROUND))
     };
     node()
@@ -49,8 +52,8 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         .column()
         .center()
         .child_gap(24.0)
+        .child(node().text(components::Text::new(format!("{}/{MAX_COUNT}", state.value)).size(24.0)))
         .child(
-            // The "value": 10 px per step.
             node()
                 .size(fixed(400.0), fixed(24.0))
                 .corner_radius(12.0)
@@ -58,18 +61,21 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
                 .clip(Clip::X)
                 .child(
                     node()
-                        .size(fixed(state.value as f32 * 10.0), grow())
+                        .size(fraction(state.value as f32 / MAX_COUNT as f32), grow())
+                        .spring(components::Spring::new(components::SpringProps::SIZE))
                         .corner_radius(12.0)
                         .background(Fill::linear(0.0, &[Color::hex(0x89b4fa), Color::hex(0xcba6f7)])),
                 ),
         )
         .child(
             node()
+                .row()
                 .child_gap(16.0)
-                .child(button(0xf38ba8).on_click_action(Change { amount: -1 }))
-                .child(button(0xa6e3a1).on_click(cx.listener(on_click_increment)))
-                .child(button(0x585b70).on_click_action(Reset)),
+                .child(button("-1", 0xf38ba8, 0x181825).on_click_action(Change { amount: -1 }))
+                .child(button("+1", 0xa6e3a1, 0x181825).on_click(cx.listener(on_click_increment)))
+                .child(button("Reset", 0x585b70, 0xffffff).on_click_action(Reset)),
         )
+        .child(node().text(components::Text::new("Up / Down to change · R to reset").size(14.0)))
 }
 
 fn main() {

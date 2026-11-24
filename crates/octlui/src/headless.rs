@@ -5,7 +5,7 @@ use crate::image::ImageStore;
 use crate::layout::LayoutEnv;
 use crate::node::Node;
 use crate::render::{GpuContext, GpuError, Renderer};
-use crate::text::{PlaceholderMeasurer, TextMeasurer};
+use crate::text::{NativeTextMeasurer, TextMeasurer};
 use crate::ui::Ui;
 
 /// Rendered pixels, RGBA8, row-major, straight (non-premultiplied) alpha.
@@ -66,7 +66,7 @@ impl HeadlessRenderer {
             renderer,
             ui,
             images: ImageStore::default(),
-            measurer: Box::new(PlaceholderMeasurer),
+            measurer: Box::new(NativeTextMeasurer::default()),
             target,
             size_px: (width, height),
             scale,

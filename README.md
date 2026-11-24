@@ -6,10 +6,6 @@ contexts, and typed listeners. Pure Rust: `winit 0.31` for windowing, `wgpu` for
 
 ![showcase](docs/showcase.png)
 
-> **Status: early.** Layout, painting, input, animation and the GPU renderer work and are
-> tested (including real GPU output through software Vulkan in CI). **Text rendering is not
-> implemented yet**; the seams for it exist (see [Text](#text)).
-
 ## A taste
 
 ```rust
@@ -141,12 +137,28 @@ view() -> Node tree
 
 ## Text
 
-Not implemented. The hooks:
+Windowed and headless renderers use the system sans-serif font by default. Use
+`components::FontId::SERIF` or `MONOSPACE` to select another system family.
+In the application setup callback, load a local font or look up an installed font
+by family or PostScript name. Pass the returned ID to `Text::font` to select it for
+one node, or set the default before opening a window:
 
-* `text::TextMeasurer` (layout) with `AppContext::set_text_measurer`. The default
-  `PlaceholderMeasurer` fakes glyph metrics so wrapping/clipping layout can be exercised.
-* `render::TextRenderer` (draw) with `AppContext::set_text_renderer`. Receives
-  `TextRun`s interleaved in z-order with quads. The default draws nothing.
+```rust,ignore
+let body = acx.load_font("assets/Body.otf").expect("load body font");
+acx.set_default_font(body);
+let heading = acx.load_system_font("Georgia").unwrap_or(body);
+let title = octlui::components::Text::new("Settings").font(heading);
+```
+
+Layout uses the selected face's advances and line metrics in logical pixels.
+The renderer rasterizes glyphs at the window's physical scale through DirectWrite
+on Windows, Core Graphics on macOS, and FreeType on Linux. Coverage masks stay in
+GPU atlas pages across frames. Consecutive glyphs on one page share an instanced draw.
+
+The built-in layout maps individual Unicode characters to glyphs. Complex-script
+shaping, bidirectional layout, and fallback across font families require a custom
+`TextMeasurer` and `TextRenderer`. Install them with `AppContext::set_text_measurer`
+and `AppContext::set_text_renderer`.
 
 ## Images
 

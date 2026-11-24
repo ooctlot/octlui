@@ -1,5 +1,4 @@
 //! Interactive showcase of the node properties. Run with `cargo run --example showcase`.
-//! (Text is not rendered yet, so labels are represented by colored blocks.)
 
 use octlui::components::*;
 use octlui::geometry::*;
@@ -9,6 +8,8 @@ use std::time::Duration;
 
 pub fn showcase() -> Node {
     let card = |c: u32| node().size(fixed(56.0), fixed(56.0)).corner_radius(12.0).background(c);
+
+    let label = |text: &str| node().text(Text::new(text).size(14.0));
 
     // Sidebar with a scrollable list.
     let list_items = (0..24).map(|i| {
@@ -20,7 +21,7 @@ pub fn showcase() -> Node {
             .background(shade as u32)
             .padding((10.0, 0.0))
             .align(Align::Start, Align::Center)
-            .child(node().size(fixed(60.0 + (i * 13 % 90) as f32), fixed(8.0)).corner_radius(4.0).background(0x6c7086))
+            .child(node().text(Text::new(format!("Item {}", i + 1)).size(14.0)))
     });
     let sidebar = node()
         .id("sidebar")
@@ -62,13 +63,13 @@ pub fn showcase() -> Node {
                 .border(0xa6e3a1, 2.0),
         );
 
-    // Springs: hover to see the card grow with a spring.
+    // Cards demonstrate hover tooltips and spring configuration.
     let springy = node().row().child_gap(10.0).children((0..4).map(|i| {
         card([0xf38ba8, 0xa6e3a1, 0x89b4fa, 0xf9e2af][i])
             .id(("spring", i))
             .tooltip(Tooltip::new(
                 node().padding(8.0).corner_radius(8.0).background(0x11111b).border(0x45475a, 1.0).child(
-                    node().size(fixed(70.0), fixed(10.0)).corner_radius(5.0).background(0xcdd6f4),
+                    node().text(Text::new(format!("Spring card {}", i + 1)).size(14.0)),
                 ),
             ))
             .spring(Spring::bouncy(SpringProps::BACKGROUND | SpringProps::SIZE))
@@ -98,6 +99,8 @@ pub fn showcase() -> Node {
                 .corner_radius(12.0)
                 .background(0xf38ba8)
                 .border(0x1e1e2e, 3.0)
+                .center()
+                .child(node().text(Text::new("3").size(12.0).color(0x181825)))
                 .floating(
                     Floating::floating()
                         .parent_anchor(Anchor::TOP_RIGHT)
@@ -111,9 +114,14 @@ pub fn showcase() -> Node {
         .column()
         .child_gap(20.0)
         .padding(20.0)
+        .child(node().text(Text::new("octlui showcase").size(26.0)))
+        .child(label("Linear fill, radial fill, and border"))
         .child(gradients)
+        .child(label("Hover over a card to see its tooltip"))
         .child(springy)
+        .child(label("Right-to-left layout and floating badge"))
         .child(node().row().child_gap(20.0).child(aligned).child(with_badge))
+        .child(label("Progress: 60%"))
         .child(node().size(grow(), fixed(10.0)).corner_radius(5.0).background(0x313244).clip(Clip::X).child(
             node().width(fraction(0.6)).height(grow()).corner_radius(5.0).background(Fill::linear(
                 0.0,

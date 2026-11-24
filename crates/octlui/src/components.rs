@@ -21,11 +21,13 @@ pub struct Appearance {
     pub border_width: f32,
 }
 
-/// Opaque font handle. Text rendering is not implemented yet; this reserves the API.
+/// Font handle. Use a built-in family or load a face through `AppContext`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct FontId(pub u32);
 impl FontId {
     pub const DEFAULT: FontId = FontId(0);
+    pub const SERIF: FontId = FontId(1);
+    pub const MONOSPACE: FontId = FontId(2);
 }
 
 /// Text content of a node. The node becomes a text leaf: its children are ignored and its

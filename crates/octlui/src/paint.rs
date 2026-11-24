@@ -143,6 +143,17 @@ impl<'a> Painter<'a> {
             self.image(img, n.pad, rect, clip, r, vis.as_ref().and_then(|v| v.tint), alpha);
         }
 
+        let mut child_clip = clip;
+        if clips {
+            let lim = Rect::new(
+                if n.clip.x() { rect.x } else { -1.0e9 },
+                if n.clip.y() { rect.y } else { -1.0e9 },
+                if n.clip.x() { rect.w } else { 2.0e9 },
+                if n.clip.y() { rect.h } else { 2.0e9 },
+            );
+            child_clip = clip.intersect(&lim);
+        }
+
         // ---- text ----
         if let Some(t) = &n.text {
             if !t.content.is_empty() {
@@ -155,7 +166,11 @@ impl<'a> Painter<'a> {
                 let area = rect.shrink(n.pad);
                 self.list.ops.push(DrawOp::Text(TextRun {
                     rect: area,
-                    clip: clip.intersect(&rect),
+                    clip: match t.wrap {
+                        TextWrap::None => child_clip,
+                        TextWrap::Clip { .. } | TextWrap::Fade { .. } => clip.intersect(&area),
+                        _ => clip.intersect(&rect),
+                    },
                     content: t.content.clone(),
                     color: color.mul_alpha(alpha),
                     size: t.size,
@@ -167,16 +182,6 @@ impl<'a> Painter<'a> {
         }
 
         // ---- children ----
-        let mut child_clip = clip;
-        if clips {
-            let lim = Rect::new(
-                if n.clip.x() { rect.x } else { -1.0e9 },
-                if n.clip.y() { rect.y } else { -1.0e9 },
-                if n.clip.x() { rect.w } else { 2.0e9 },
-                if n.clip.y() { rect.h } else { 2.0e9 },
-            );
-            child_clip = clip.intersect(&lim);
-        }
         if n.text.is_none() {
             for c in n.children() {
                 let ch = &arena.nodes[c];
