@@ -34,11 +34,13 @@ fn on_click_increment(state: &mut State, cx: &mut Context<State>, _: &events::Cl
 }
 
 fn view(state: &mut State, cx: &mut Context<State>) -> Node {
-    let button = |color: u32| {
+    let button = |label: &str, color: u32, ink: u32| {
         node()
-            .size(fixed(64.0), fixed(64.0))
+            .size(fixed(80.0), fixed(48.0))
             .corner_radius(16.0)
             .background(color)
+            .center()
+            .child(node().text(components::Text::new(label).color(ink)))
             .spring(components::Spring::new(components::SpringProps::BACKGROUND))
     };
     node()
@@ -49,7 +51,7 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         .column()
         .center()
         .child_gap(24.0)
-        .child(node().text(components::Text::new(state.value.to_string()).size(24.0)))
+        .child(node().text(components::Text::new(format!("Count: {}", state.value)).size(24.0)))
         .child(
             // The "value": 10 px per step.
             node()
@@ -66,11 +68,13 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         )
         .child(
             node()
+                .row()
                 .child_gap(16.0)
-                .child(button(0xf38ba8).on_click_action(Change { amount: -1 }))
-                .child(button(0xa6e3a1).on_click(cx.listener(on_click_increment)))
-                .child(button(0x585b70).on_click_action(Reset)),
+                .child(button("−1", 0xf38ba8, 0x181825).on_click_action(Change { amount: -1 }))
+                .child(button("+1", 0xa6e3a1, 0x181825).on_click(cx.listener(on_click_increment)))
+                .child(button("Reset", 0x585b70, 0xffffff).on_click_action(Reset)),
         )
+        .child(node().text(components::Text::new("Up / Down to change · R to reset").size(14.0)))
 }
 
 fn main() {
