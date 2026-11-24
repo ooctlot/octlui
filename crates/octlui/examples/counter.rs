@@ -1,6 +1,6 @@
 //! The counter from the design sketch: actions, key bindings, listeners.
 //! `cargo run --example counter` — press R to reset, Up/Down to change, click the buttons.
-//! The value is shown as the width of a bar until text rendering lands.
+//! The counter displays its value above the bar.
 
 use octlui::geometry::*;
 use octlui::style::*;
@@ -49,6 +49,7 @@ fn view(state: &mut State, cx: &mut Context<State>) -> Node {
         .column()
         .center()
         .child_gap(24.0)
+        .child(node().text(components::Text::new(state.value.to_string()).size(24.0)))
         .child(
             // The "value": 10 px per step.
             node()

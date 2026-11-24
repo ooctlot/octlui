@@ -28,7 +28,7 @@ jobs:
       - name: System dependencies (software Vulkan for the GPU tests)
         run: |
           sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libxkbcommon-dev libwayland-dev
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libxkbcommon-dev libwayland-dev libfontconfig1-dev libfreetype-dev fonts-dejavu-core
       - uses: Swatinem/rust-cache@v2
       - name: Build examples
         run: cargo build --workspace --examples

@@ -1,5 +1,6 @@
 //! Render commands and the wgpu renderer.
 
+mod atlas;
 mod gpu;
 mod text;
 
@@ -42,7 +43,7 @@ pub struct GpuGradient {
     pub params: [f32; 4],
 }
 
-/// A run of text to draw. Consumed by the [`TextRenderer`] hook (not implemented yet).
+/// A run of text to draw. Drawn by the native renderer or a custom [`TextRenderer`] hook.
 #[derive(Clone, Debug)]
 pub struct TextRun {
     pub rect: Rect,

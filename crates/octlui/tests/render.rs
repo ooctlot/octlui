@@ -118,3 +118,14 @@ fn many_quads_render() {
     let shot = r.render(node().size(fixed(200.0), fixed(200.0)).row().children(cells));
     assert!(close(shot.pixel(0, 0), [255, 255, 255], 1));
 }
+
+#[test]
+fn cached_native_glyphs_draw_inside_text_clip() {
+    let Some(mut r) = renderer(96, 40) else { return };
+    let shot = r.render(node().size(fixed(48.), fixed(40.)).text(
+        components::Text::new("MMMMMMMM").size(24.).color(0xffffff).wrap(TextWrap::Clip { ellipsis: false })
+    ));
+    assert!((0..40).any(|y| (0..48).any(|x| shot.pixel(x,y)[0] > 128)));
+    assert!((0..40).all(|y| (48..96).all(|x| shot.pixel(x,y)[0] == 0)));
+    assert_eq!(shot.rgba, r.read_pixels().rgba);
+}

@@ -1,6 +1,6 @@
 //! wgpu device setup and the quad renderer.
 
-use super::{DrawOp, NoopTextRenderer, QuadInstance, RenderList, TextRenderer, TextRun};
+use super::{DrawOp, QuadInstance, RenderList, TextRenderer, TextRun};
 use crate::geometry::Color;
 use crate::id::KeyMap;
 use crate::image::{ImageId, ImageStore};
@@ -65,6 +65,7 @@ struct GpuImage {
 }
 
 enum Batch {
+    Glyphs { page: usize, range: std::ops::Range<u32> },
     Quads { image: Option<ImageId>, range: std::ops::Range<u32> },
     Text { range: std::ops::Range<usize> },
 }
@@ -84,7 +85,10 @@ pub struct Renderer {
     gradient_buf: wgpu::Buffer,
     gradient_cap: usize,
     images: KeyMap<GpuImage>,
-    text: Box<dyn TextRenderer>,
+    text: Option<Box<dyn TextRenderer>>,
+    native: super::atlas::NativeText,
+    glyphs: Vec<(usize, QuadInstance)>,
+    colors: RenderList,
     // scratch, reused across frames
     instances: Vec<QuadInstance>,
     batches: Vec<Batch>,
@@ -226,7 +230,10 @@ impl Renderer {
             gradient_buf,
             gradient_cap,
             images: KeyMap::default(),
-            text: Box::new(NoopTextRenderer),
+            text: None,
+            native: Default::default(),
+            glyphs: Vec::new(),
+            colors: RenderList::default(),
             instances: Vec::new(),
             batches: Vec::new(),
             runs: Vec::new(),
@@ -239,7 +246,7 @@ impl Renderer {
 
     /// Installs a text renderer (see [`TextRenderer`]).
     pub fn set_text_renderer(&mut self, t: Box<dyn TextRenderer>) {
-        self.text = t;
+        self.text = Some(t);
     }
 
     fn make_instance_buf(device: &wgpu::Device, cap: usize) -> wgpu::Buffer {
@@ -345,12 +352,26 @@ impl Renderer {
         self.instances.clear();
         self.batches.clear();
         self.runs.clear();
+        self.native.begin_frame();
+        self.colors.gradients.clone_from(&list.gradients);
         for op in &list.ops {
             match op {
                 DrawOp::Quad(q) => self.push_quad(None, *q),
                 DrawOp::Image(id, q) => {
                     if self.ensure_image(gpu, images, *id) {
                         self.push_quad(Some(*id), *q);
+                    }
+                }
+                DrawOp::Text(t) if self.text.is_none() => {
+                    self.glyphs.clear();
+                    self.native.prepare(gpu, &self.texture_layout, &self.sampler, t, scale, &mut self.colors, &mut self.glyphs);
+                    for &(page, quad) in &self.glyphs {
+                        let i = self.instances.len() as u32;
+                        self.instances.push(quad);
+                        match self.batches.last_mut() {
+                            Some(Batch::Glyphs { page: prev, range }) if *prev == page => range.end = i + 1,
+                            _ => self.batches.push(Batch::Glyphs { page, range: i..i + 1 }),
+                        }
                     }
                 }
                 DrawOp::Text(t) => {
@@ -377,8 +398,8 @@ impl Renderer {
             self.instance_cap = self.instances.len().next_power_of_two();
             self.instance_buf = Self::make_instance_buf(&gpu.device, self.instance_cap);
         }
-        if list.gradients.len() > self.gradient_cap {
-            self.gradient_cap = list.gradients.len().next_power_of_two();
+        if self.colors.gradients.len() > self.gradient_cap {
+            self.gradient_cap = self.colors.gradients.len().next_power_of_two();
             self.gradient_buf = Self::make_gradient_buf(&gpu.device, self.gradient_cap);
             regroup = true;
         }
@@ -389,11 +410,11 @@ impl Renderer {
         if !self.instances.is_empty() {
             gpu.queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&self.instances));
         }
-        if !list.gradients.is_empty() {
-            gpu.queue.write_buffer(&self.gradient_buf, 0, bytemuck::cast_slice(&list.gradients));
+        if !self.colors.gradients.is_empty() {
+            gpu.queue.write_buffer(&self.gradient_buf, 0, bytemuck::cast_slice(&self.colors.gradients));
         }
         if !self.runs.is_empty() {
-            self.text.prepare(gpu, &self.runs, scale);
+            self.text.as_mut().unwrap().prepare(gpu, &self.runs, scale);
         }
 
         // ---- encode ----
@@ -433,8 +454,12 @@ impl Renderer {
                         pass.set_bind_group(1, bg, &[]);
                         pass.draw(0..4, range.clone());
                     }
+                    Batch::Glyphs { page, range } => {
+                        pass.set_bind_group(1, self.native.group(*page), &[]);
+                        pass.draw(0..4, range.clone());
+                    }
                     Batch::Text { range } => {
-                        self.text.draw(&mut pass, range.clone());
+                        self.text.as_mut().unwrap().draw(&mut pass, range.clone());
                         // A text renderer may have changed pipeline state.
                         pass.set_pipeline(&self.pipeline);
                         pass.set_bind_group(0, &self.globals_group, &[]);

@@ -1,5 +1,7 @@
-//! Text hooks. Real text shaping/rendering is not implemented yet; this module defines the
-//! seams so it can be added without touching layout, painting or the renderer.
+//! Text measurement and line layout.
+
+mod native;
+pub use native::NativeTextMeasurer;
 
 use crate::components::Text;
 use crate::geometry::Vec2;

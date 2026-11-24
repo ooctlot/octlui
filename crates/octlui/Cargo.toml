@@ -13,6 +13,8 @@ winit.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
+font-kit = "0.14"
+pathfinder_geometry = "0.5"
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }

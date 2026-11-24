@@ -7,8 +7,8 @@ use crate::geometry::{Color, Vec2};
 use crate::image::ImageStore;
 use crate::layout::LayoutEnv;
 use crate::node::Node;
-use crate::render::{GpuContext, NoopTextRenderer, Renderer, TextRenderer};
-use crate::text::{PlaceholderMeasurer, TextMeasurer};
+use crate::render::{GpuContext, Renderer, TextRenderer};
+use crate::text::{NativeTextMeasurer, TextMeasurer};
 use crate::ui::{Env, Ui};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -70,7 +70,7 @@ pub struct AppContext {
     globals: Vec<(TypeId, GlobalHandler)>,
     quit: bool,
     measurer: TextMeasurerFactory,
-    text_renderer: TextRendererFactory,
+    text_renderer: Option<TextRendererFactory>,
 }
 
 impl AppContext {
@@ -81,8 +81,8 @@ impl AppContext {
             pending: Vec::new(),
             globals: Vec::new(),
             quit: false,
-            measurer: Box::new(|| Box::new(PlaceholderMeasurer)),
-            text_renderer: Box::new(|| Box::new(NoopTextRenderer)),
+            measurer: Box::new(|| Box::new(NativeTextMeasurer::default())),
+            text_renderer: None,
         }
     }
 
@@ -116,7 +116,7 @@ impl AppContext {
     }
     /// Replaces the text renderer used by new windows.
     pub fn set_text_renderer(&mut self, f: impl Fn() -> Box<dyn TextRenderer> + 'static) {
-        self.text_renderer = Box::new(f);
+        self.text_renderer = Some(Box::new(f));
     }
 
     /// Quits the application after the current event.
@@ -232,7 +232,7 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
         surface.configure(&gpu_ctx.device, &config);
 
         let mut renderer = Renderer::new(&gpu_ctx, config.format);
-        renderer.set_text_renderer((app.text_renderer)());
+        if let Some(factory) = &app.text_renderer { renderer.set_text_renderer(factory()); }
 
         let mut ui = Ui::new();
         let scale = win.scale_factor() as f32;
