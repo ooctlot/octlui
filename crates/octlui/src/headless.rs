@@ -5,7 +5,7 @@ use crate::image::ImageStore;
 use crate::layout::LayoutEnv;
 use crate::node::Node;
 use crate::render::{GpuContext, GpuError, Renderer};
-use crate::text::{NativeTextMeasurer, ShapedText, TextMeasurer};
+use crate::text::{NativeTextMeasurer, TextMeasurer};
 use crate::ui::Ui;
 
 /// Rendered pixels, RGBA8, row-major, straight (non-premultiplied) alpha.
@@ -48,7 +48,7 @@ impl HeadlessRenderer {
     pub fn new(width: u32, height: u32, scale: f32) -> Result<Self, GpuError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let gpu = GpuContext::new(instance, None)?;
-        let renderer = Renderer::new(&gpu, FORMAT);
+        let mut renderer = Renderer::new(&gpu, FORMAT);
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("octlui headless target"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -60,6 +60,7 @@ impl HeadlessRenderer {
             view_formats: &[],
         });
         let mut ui = Ui::new();
+        renderer.set_input_text(ui.input_text.clone());
         ui.set_size(Vec2::new(width as f32 / scale, height as f32 / scale), scale);
         Ok(Self {
             gpu,
@@ -86,7 +87,7 @@ impl HeadlessRenderer {
 
     /// Enables the Unicode shaping backend for layout and drawing.
     pub fn enable_text_shaping(&mut self) {
-        let text = ShapedText::new(Default::default(), Default::default());
+        let text = self.ui.input_text.clone();
         self.renderer.set_shaped_text(text.clone());
         self.measurer = Box::new(text);
         self.ui.invalidate_layout();
@@ -97,7 +98,8 @@ impl HeadlessRenderer {
     }
     /// Advances animations by `dt` seconds and re-lays out. Returns `true` while animating.
     pub fn frame(&mut self, dt: f32) -> bool {
-        let mut env = LayoutEnv { text: &mut *self.measurer, images: &mut self.images };
+        let input_text = self.ui.input_text.clone();
+        let mut env = LayoutEnv { text: &mut *self.measurer, input_text: Some(&input_text), images: &mut self.images };
         self.ui.frame(dt, dt, &mut env).0
     }
 

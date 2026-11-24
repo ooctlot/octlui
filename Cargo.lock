@@ -1382,6 +1382,7 @@ dependencies = [
  "octlui-macros",
  "pathfinder_geometry",
  "pollster",
+ "unicode-segmentation",
  "url",
  "wgpu",
  "winit",

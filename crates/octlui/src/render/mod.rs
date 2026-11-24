@@ -62,6 +62,8 @@ pub enum DrawOp {
     /// A quad sampling the given image.
     Image(ImageId, QuadInstance),
     Text(TextRun),
+    /// Editable text drawn with the shaping backend used for caret placement.
+    InputText(TextRun),
 }
 
 /// Everything needed to draw one frame, in back-to-front order.

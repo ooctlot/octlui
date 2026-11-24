@@ -19,6 +19,7 @@ pub(crate) struct Handlers {
     pub mouse_down: Option<ErasedFn>,
     pub hover: Option<ErasedFn>,
     pub key_down: Option<ErasedFn>,
+    pub text_change: Option<ErasedFn>,
     pub file_drop: Option<ErasedFn>,
     pub file_drop_action: Option<FileDropAction>,
     pub actions: Vec<(TypeId, ErasedFn)>,
@@ -178,6 +179,12 @@ impl Node {
     #[must_use]
     pub fn on_key_down(mut self, l: Listener<KeyDownEvent>) -> Self {
         self.handlers.key_down = Some(l.f);
+        self
+    }
+    /// Called when this node's text input changes, including during undo and redo.
+    #[must_use]
+    pub fn on_text_change(mut self, l: Listener<TextChangeEvent>) -> Self {
+        self.handlers.text_change = Some(l.f);
         self
     }
     /// Called when files are dropped onto the node.

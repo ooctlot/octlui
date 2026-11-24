@@ -9,14 +9,20 @@ use cosmic_text::{
     Metrics, Shaping, SwashCache, SwashImage, Wrap, fontdb,
 };
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     collections::{HashMap, VecDeque},
     rc::Rc,
     sync::Arc,
 };
 
 #[derive(Clone)]
-pub(crate) struct ShapedText(Rc<RefCell<Engine>>);
+pub(crate) struct ShapedText(Rc<EngineResources>);
+
+struct EngineResources {
+    fonts: Fonts,
+    default_font: FontId,
+    engine: OnceCell<RefCell<Engine>>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Key {
@@ -75,24 +81,34 @@ pub(crate) struct Line {
     pub glyphs: Vec<LayoutGlyph>,
     pub width: f32,
     pub baseline: f32,
+    pub top: f32,
+    pub height: f32,
+    pub offset: usize,
+    pub hard_end: usize,
+    pub rtl: bool,
 }
 
 #[derive(Default)]
 pub(crate) struct Layout {
     pub lines: Vec<Line>,
-    size: Vec2,
+    pub size: Vec2,
+    pub input_lines: OnceCell<Vec<crate::text_input::InputLine>>,
 }
 
 impl ShapedText {
     pub(crate) fn new(fonts: Fonts, default_font: FontId) -> Self {
-        Self(Rc::new(RefCell::new(Engine {
+        Self(Rc::new(EngineResources { fonts, default_font, engine: OnceCell::new() }))
+    }
+
+    fn engine(&self) -> &RefCell<Engine> {
+        self.0.engine.get_or_init(|| RefCell::new(Engine {
             fonts: FontSystem::new(),
-            native: NativeTextMeasurer::with_fonts(fonts, default_font),
+            native: NativeTextMeasurer::with_fonts(self.0.fonts.clone(), self.0.default_font),
             families: HashMap::new(),
             rasterizer: SwashCache::new(),
             layouts: HashMap::new(),
             clock: 0,
-        })))
+        }))
     }
 
     pub fn layout(
@@ -118,15 +134,21 @@ impl ShapedText {
             }
             Breaks::Single | Breaks::Hard => None,
         };
-        self.0.borrow_mut().layout(key, width)
+        self.engine().borrow_mut().layout(key, width)
     }
 
     pub fn raster(&self, key: CacheKey) -> Option<SwashImage> {
-        let mut engine = self.0.borrow_mut();
+        let mut engine = self.engine().borrow_mut();
         let Engine {
             rasterizer, fonts, ..
         } = &mut *engine;
         rasterizer.get_image_uncached(fonts, key)
+    }
+}
+
+impl Default for ShapedText {
+    fn default() -> Self {
+        Self::new(Fonts::default(), FontId::DEFAULT)
     }
 }
 
@@ -161,20 +183,36 @@ impl Engine {
         cached.buffer.set_size(width, None);
         cached.buffer.shape_until_scroll(&mut self.fonts, false);
         let mut size = Vec2::ZERO;
+        let mut offsets = cached.buffer.lines.iter().scan(0, |offset, line| {
+            let start = *offset;
+            *offset += line.text().len() + line.ending().as_str().len();
+            Some(start)
+        });
+        let mut line_index = 0;
+        let mut offset = offsets.next().unwrap_or(0);
         let lines = cached
             .buffer
             .layout_runs()
             .map(|line| {
+                while line_index < line.line_i {
+                    line_index += 1;
+                    offset = offsets.next().unwrap_or(offset);
+                }
                 size.x = size.x.max(line.line_w);
                 size.y = size.y.max(line.line_top + line.line_height);
                 Line {
                     glyphs: line.glyphs.to_vec(),
                     width: line.line_w,
                     baseline: line.line_y,
+                    top: line.line_top,
+                    height: line.line_height,
+                    offset,
+                    hard_end: offset + line.text.len(),
+                    rtl: line.rtl,
                 }
             })
             .collect();
-        let layout = Rc::new(Layout { lines, size });
+        let layout = Rc::new(Layout { lines, size, input_lines: OnceCell::new() });
         if cached.widths.len() == WIDTH_LIMIT {
             cached.widths.pop_back();
         }

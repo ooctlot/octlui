@@ -266,6 +266,7 @@ impl GlyphCache {
 pub(super) struct NativeText {
     pub(super) fonts: NativeTextMeasurer,
     shaped: Option<ShapedText>,
+    input_text: ShapedText,
     cache: GlyphCache,
 }
 
@@ -273,6 +274,10 @@ impl NativeText {
     pub(super) fn set_shaped(&mut self, text: ShapedText) {
         self.shaped = Some(text);
         self.cache = GlyphCache::default();
+    }
+
+    pub(super) fn set_input_text(&mut self, text: ShapedText) {
+        self.input_text = text;
     }
 
     pub fn begin_frame(&mut self) {
@@ -291,6 +296,7 @@ impl NativeText {
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         run: &TextRun,
+        input: bool,
         scale: f32,
         colors: &mut RenderList,
         out: &mut Vec<(usize, QuadInstance)>,
@@ -309,7 +315,11 @@ impl NativeText {
             } else {
                 remaining
             };
-            let start = area.x + run.align.factor() * offset;
+            let start = area.x + if input {
+                crate::text_input::input_line_x(area.w, width, run.align)
+            } else {
+                run.align.factor() * offset
+            };
             let fade = match run.wrap {
                 TextWrap::Fade { length } if remaining < 0. => length.max(0.),
                 _ => 0.,
@@ -333,7 +343,8 @@ impl NativeText {
                 },
             ));
         };
-        if let Some(shaped) = &self.shaped {
+        let shaped = if input { Some(&self.input_text) } else { self.shaped.as_ref() };
+        if let Some(shaped) = shaped {
             let lines = shaped.layout(&run.content, run.font, run.size, run.wrap, Some(area.w));
             for line in &lines.lines {
                 let (start, fade) = line_origin(line.width);

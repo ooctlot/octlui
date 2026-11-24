@@ -11,7 +11,8 @@ use crate::node::Node;
 use crate::render::{GpuContext, Renderer, TextRenderer};
 use crate::text::{FontLoadingError, Fonts, NativeTextMeasurer, ShapedText, SystemFontError, TextMeasurer};
 use font_kit::{family_name::FamilyName, font::Font, properties::Properties, source::SystemSource};
-use crate::ui::{Env, Ui};
+use crate::text_input::ClipboardCommand;
+use crate::ui::{Env, ImeTarget, InputKey, PasteTarget, Ui};
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,11 +22,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
-use winit::data_transfer::{DataTransferId, TypeHint};
-use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
+use winit::cursor::CursorIcon;
+use winit::data_transfer::{DataTransferId, DataTransferSendBuilder, TypeHint, TypedData};
+use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, AsyncRequestSerial, ControlFlow, DndAction, EventLoop, EventLoopProxy};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window as WinitWindow, WindowAttributes, WindowId};
+use winit::keyboard::{Key as WinitKey, KeyCode, NamedKey, PhysicalKey};
+use winit::window::{
+    ImeCapabilities, ImeEnableRequest, ImeRequest, ImeRequestData, ImeSurroundingText, Window as WinitWindow,
+    WindowAttributes, WindowId,
+};
 
 /// Logical pixels scrolled per mouse wheel "line".
 const LINE_SCROLL_PX: f32 = 48.0;
@@ -171,7 +176,8 @@ impl AppContext {
     }
 
     /// Enables Unicode shaping, bidirectional layout and font fallback in new windows.
-    /// Custom text measurers and renderers keep taking precedence when installed.
+    /// Custom text measurers and renderers keep taking precedence for display text.
+    /// Text inputs always use the built-in shaping backend.
     pub fn enable_text_shaping(&mut self) {
         self.shape_text = true;
     }
@@ -227,6 +233,7 @@ trait UiWindow {
     fn event(&mut self, app: &mut AppContext, el: &dyn ActiveEventLoop, ev: WindowEvent) -> bool;
     fn images_changed(&mut self);
     fn wake_at(&mut self, now: Instant) -> Option<Instant>;
+    fn clipboard_received(&mut self, app: &mut AppContext, id: DataTransferId, serial: AsyncRequestSerial, value: &dyn TypedData) -> bool;
 }
 
 struct WindowSpec<S> {
@@ -240,6 +247,12 @@ struct FileTransfer {
     position: Option<Vec2>,
     drop: Option<(u64, Vec2)>,
     paths: Option<Vec<PathBuf>>,
+}
+
+struct PendingPaste {
+    id: DataTransferId,
+    serial: AsyncRequestSerial,
+    target: PasteTarget,
 }
 
 struct Window<S> {
@@ -258,6 +271,9 @@ struct Window<S> {
     last_frame: Instant,
     redraw_at: Option<Instant>,
     transfers: HashMap<DataTransferId, FileTransfer>,
+    paste: Option<PendingPaste>,
+    ime: Option<ImeTarget>,
+    text_cursor: bool,
     closed: bool,
 }
 
@@ -309,13 +325,17 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
 
         let mut renderer = Renderer::new(&gpu_ctx, config.format);
         renderer.set_native_fonts(NativeTextMeasurer::with_fonts(app.fonts.clone(), app.default_font));
-        let shaped = app.shape_text.then(|| ShapedText::new(app.fonts.clone(), app.default_font));
+        let input_text = ShapedText::new(app.fonts.clone(), app.default_font);
+        let shaped = app.shape_text.then(|| input_text.clone());
+        renderer.set_input_text(input_text.clone());
         if let Some(text) = &shaped {
             renderer.set_shaped_text(text.clone());
         }
         if let Some(factory) = &app.text_renderer { renderer.set_text_renderer(factory()); }
 
         let mut ui = Ui::new();
+        ui.input_text = input_text;
+        ui.set_window_focus(win.has_focus());
         let scale = win.scale_factor() as f32;
         ui.set_size(Vec2::new(size.width as f32 / scale, size.height as f32 / scale), scale);
 
@@ -344,6 +364,9 @@ impl<S: 'static> PendingWindow for WindowSpec<S> {
             last_frame: Instant::now(),
             redraw_at: None,
             transfers: HashMap::new(),
+            paste: None,
+            ime: None,
+            text_cursor: false,
             closed: false,
         }))
     }
@@ -387,6 +410,41 @@ fn map_button(b: winit::event::MouseButton) -> MouseButton {
     }
 }
 
+fn editor_key(event: &KeyEvent, physical: Option<Key>) -> Option<Key> {
+    use NamedKey as N;
+    match &event.logical_key {
+        WinitKey::Named(named) => Some(match named {
+            N::ArrowLeft => Key::Left,
+            N::ArrowRight => Key::Right,
+            N::ArrowUp => Key::Up,
+            N::ArrowDown => Key::Down,
+            N::Home => Key::Home,
+            N::End => Key::End,
+            N::PageUp => Key::PageUp,
+            N::PageDown => Key::PageDown,
+            N::Backspace => Key::Backspace,
+            N::Delete => Key::Delete,
+            N::Insert => Key::Insert,
+            N::Enter => Key::Enter,
+            N::Tab => Key::Tab,
+            N::Escape => Key::Escape,
+            N::Copy => Key::Copy,
+            N::Cut => Key::Cut,
+            N::Paste => Key::Paste,
+            N::Undo => Key::Undo,
+            N::Redo => Key::Redo,
+            _ => return physical,
+        }),
+        _ => match &event.key_without_modifiers {
+            WinitKey::Character(c) => Key::from_name(c).or_else(|| {
+                // A layout without Latin letters can still use the conventional physical shortcuts.
+                physical.filter(|key| key.name().len() == 1 && key.name().as_bytes()[0].is_ascii_alphabetic())
+            }),
+            _ => physical,
+        },
+    }
+}
+
 /// Converts a `file://` URI into a path.
 pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let url = url::Url::parse(uri).ok()?;
@@ -397,6 +455,79 @@ pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
 }
 
 impl<S: 'static> Window<S> {
+    fn clipboard(&mut self, el: &dyn ActiveEventLoop, command: ClipboardCommand) {
+        let cut = matches!(command, ClipboardCommand::Cut(_));
+        match command {
+            ClipboardCommand::Copy(value) | ClipboardCommand::Cut(value) => {
+                let transfer = DataTransferSendBuilder::new(value)
+                    .with_type(TypeHint::Plaintext, |text, _| Some(text.to_string()))
+                    .build();
+                if el.set_clipboard(transfer).is_ok() && cut {
+                    let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+                    self.ui.cut(&mut env);
+                }
+            }
+            ClipboardCommand::Paste => {
+                self.paste = None;
+                let Some(target) = self.ui.paste_target() else { return };
+                let Ok(Some(id)) = el.clipboard() else { return };
+                if el.data_transfer(id).is_ok_and(|data| data.has_type(&TypeHint::Plaintext))
+                    && let Ok(serial) = el.fetch_data_transfer(id, &TypeHint::Plaintext)
+                {
+                    self.paste = Some(PendingPaste { id, serial, target });
+                }
+            }
+        }
+    }
+
+    fn input_cursor(&mut self) {
+        let text = self.ui.text_cursor();
+        if self.text_cursor != text {
+            self.text_cursor = text;
+            self.win.set_cursor(if text { CursorIcon::Text } else { CursorIcon::Default }.into());
+        }
+    }
+
+    fn sync_ime(&mut self) {
+        let target = self.ui.ime_target();
+        if target == self.ime {
+            return;
+        }
+        let previous = std::mem::replace(&mut self.ime, target);
+        let same_editor = self.ime.as_ref().zip(previous.as_ref())
+            .is_some_and(|(target, old)| target.key == old.key);
+        if !same_editor && previous.is_some() {
+            let _ = self.win.request_ime_update(ImeRequest::Disable);
+        }
+        if let Some(target) = &self.ime {
+            let rect = target.rect;
+            let mut data = ImeRequestData::default().with_cursor_area(
+                winit::dpi::LogicalPosition::new(rect.x, rect.y).into(),
+                winit::dpi::LogicalSize::new(rect.w, rect.h).into(),
+            );
+            let limit = ImeSurroundingText::MAX_TEXT_BYTES - 1;
+            let anchor = if target.caret.abs_diff(target.anchor) < limit { target.anchor } else { target.caret };
+            let left = target.caret.min(anchor);
+            let right = target.caret.max(anchor);
+            let available = limit - (right - left);
+            let start = target.text.ceil_char_boundary(left.saturating_sub(available / 2));
+            let end = target.text.floor_char_boundary((start + limit).min(target.text.len()));
+            let selection_anchor = if anchor <= end { anchor } else { target.caret };
+            if target.caret <= end && let Ok(text) = ImeSurroundingText::new(
+                target.text[start..end].to_owned(), target.caret - start, selection_anchor - start,
+            ) {
+                data = data.with_surrounding_text(text);
+            }
+            let request = if same_editor {
+                ImeRequest::Update(data)
+            } else {
+                let caps = ImeCapabilities::new().with_cursor_area().with_surrounding_text();
+                ImeRequest::Enable(ImeEnableRequest::new(caps, data).unwrap())
+            };
+            let _ = self.win.request_ime_update(request);
+        }
+    }
+
     fn sync_info(&mut self) {
         self.cx.info = WindowInfo {
             size: self.ui.size,
@@ -512,7 +643,8 @@ impl<S: 'static> Window<S> {
         }
 
         let (animating, geometry_changed) = {
-            let mut lenv = LayoutEnv { text: &mut *self.measurer, images: &mut app.images };
+            let input_text = self.ui.input_text.clone();
+            let mut lenv = LayoutEnv { text: &mut *self.measurer, input_text: Some(&input_text), images: &mut app.images };
             self.ui.frame(dt, elapsed, &mut lenv)
         };
 
@@ -525,6 +657,8 @@ impl<S: 'static> Window<S> {
             }
             self.pump(app);
         }
+        self.input_cursor();
+        self.sync_ime();
 
         match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -548,7 +682,8 @@ impl<S: 'static> Window<S> {
             _ => {}
         }
 
-        self.redraw_at = self.ui.tooltip_wait().and_then(|wait| now.checked_add(wait));
+        self.redraw_at = self.ui.tooltip_wait().into_iter().chain(self.ui.input_wait())
+            .min().and_then(|wait| now.checked_add(wait));
         if animating || self.dirty {
             self.win.request_redraw();
         }
@@ -575,6 +710,21 @@ impl<S: 'static> UiWindow for Window<S> {
         Some(deadline)
     }
 
+    fn clipboard_received(&mut self, app: &mut AppContext, id: DataTransferId, serial: AsyncRequestSerial, value: &dyn TypedData) -> bool {
+        let Some(paste) = self.paste.take_if(|paste| paste.id == id && paste.serial == serial) else {
+            return false;
+        };
+        if let Ok(text) = value.try_as_string() {
+            self.sync_info();
+            let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+            if self.ui.paste(paste.target, &text, &mut env) {
+                self.win.request_redraw();
+            }
+            self.pump(app);
+        }
+        true
+    }
+
     fn event(&mut self, app: &mut AppContext, el: &dyn ActiveEventLoop, ev: WindowEvent) -> bool {
         match ev {
             WindowEvent::CloseRequested => return false,
@@ -593,6 +743,7 @@ impl<S: 'static> UiWindow for Window<S> {
                 if changed {
                     self.win.request_redraw();
                 }
+                self.input_cursor();
                 self.pump(app);
             }
             WindowEvent::PointerLeft { primary: true, .. } => {
@@ -602,6 +753,7 @@ impl<S: 'static> UiWindow for Window<S> {
                     self.ui.pointer_left(&mut env);
                 }
                 self.win.request_redraw();
+                self.input_cursor();
                 self.pump(app);
             }
             WindowEvent::PointerButton { state, position, primary: true, button, .. } => {
@@ -643,18 +795,54 @@ impl<S: 'static> UiWindow for Window<S> {
                 }
                 self.ui.mods = mods;
             }
-            WindowEvent::Focused(false) => self.ui.mods = Modifiers::NONE,
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+            WindowEvent::Focused(focused) => {
+                if !focused {
+                    self.ui.mods = Modifiers::NONE;
+                    self.paste = None;
+                }
+                self.ui.set_window_focus(focused);
+                self.sync_ime();
+                self.win.request_redraw();
+            }
+            WindowEvent::KeyboardInput { event, is_synthetic, .. } if event.state == ElementState::Pressed => {
                 let key = match event.physical_key {
                     PhysicalKey::Code(c) => map_key(c),
                     _ => None,
                 };
                 let text: Option<Arc<str>> = event.text.as_ref().map(|t| Arc::from(t.as_str()));
                 self.sync_info();
-                {
-                    let mut env = Env { state: &mut self.state, cx: &mut self.cx };
-                    self.ui.key_down(key, text, event.repeat, &app.keymap, &mut env);
+                let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+                let edit = if is_synthetic {
+                    InputKey::Unhandled
+                } else {
+                    self.ui.input_key(editor_key(&event, key), text.as_deref(), &mut env)
+                };
+                match edit {
+                    InputKey::Unhandled => self.ui.key_down(key, text, event.repeat, &app.keymap, &mut env),
+                    InputKey::Handled => self.win.request_redraw(),
+                    InputKey::Clipboard(command) => {
+                        self.clipboard(el, command);
+                        self.win.request_redraw();
+                    }
                 }
+                self.pump(app);
+            }
+            WindowEvent::Ime(ime) => {
+                self.sync_info();
+                match ime {
+                    Ime::Preedit(value, cursor) => self.ui.preedit(&value, cursor),
+                    Ime::Commit(value) => {
+                        let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+                        self.ui.commit_input(&value, &mut env);
+                    }
+                    Ime::DeleteSurrounding { before_bytes, after_bytes } => {
+                        let mut env = Env { state: &mut self.state, cx: &mut self.cx };
+                        self.ui.delete_surrounding(before_bytes, after_bytes, &mut env);
+                    }
+                    Ime::Disabled => self.ui.preedit("", None),
+                    _ => {}
+                }
+                self.win.request_redraw();
                 self.pump(app);
             }
 
@@ -738,10 +926,11 @@ impl ApplicationHandler for Runner {
     }
 
     fn window_event(&mut self, el: &dyn ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let keep = match self.windows.get_mut(&id) {
-            Some(w) => w.event(&mut self.app, el, event),
-            None => true,
-        };
+        // Clipboard replies can be delivered to a window other than the requesting one.
+        let clipboard = if let WindowEvent::DataTransferReceived { id, serial, value } = &event {
+            self.windows.values_mut().any(|window| window.clipboard_received(&mut self.app, *id, *serial, value.as_ref()))
+        } else { false };
+        let keep = clipboard || self.windows.get_mut(&id).is_none_or(|window| window.event(&mut self.app, el, event));
         if !keep {
             self.windows.remove(&id);
         }

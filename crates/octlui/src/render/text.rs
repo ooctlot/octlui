@@ -1,6 +1,7 @@
 use super::{GpuContext, TextRun};
 
-/// Hook for GPU text rendering. Install [`NoopTextRenderer`] to disable text drawing.
+/// Hook for GPU display-text rendering. Text inputs use the built-in shaping renderer.
+/// Install [`NoopTextRenderer`] to disable display-text drawing.
 ///
 /// Per frame the renderer first calls [`prepare`](TextRenderer::prepare) once with all runs in
 /// draw order (upload glyphs, build buffers), then [`draw`](TextRenderer::draw) for each

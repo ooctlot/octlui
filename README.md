@@ -72,7 +72,7 @@ called, and animations/scrolling run without it.
 
 **Listeners.** `cx.listener(f)` turns `fn(&mut S, &mut Context<S>, &E)` *or*
 `fn(&mut S, &mut Context<S>, E)` into a handler; `E` is inferred. Node handlers: `on_click`,
-`on_mouse_down`, `on_hover`, `on_key_down`, `on_file_drop`, `on_action`, plus
+`on_mouse_down`, `on_hover`, `on_key_down`, `on_text_change`, `on_file_drop`, `on_action`, plus
 `on_click_action(action)` and `on_file_drop_action(map)`. `Context` also offers `dispatch`,
 `focus`, `blur`, `set_title`, `close_window`, `quit`, `is_hovered`, and `is_focused`.
 
@@ -105,7 +105,7 @@ Optional components (each boxed, so plain nodes stay small):
 | component | what it does |
 |---|---|
 | `Appearance` | background + border (width, color); colors may be gradients (`Fill::linear`, `Fill::radial`, up to 8 stops) |
-| `Text` | content, color (gradient ok), size, font, alignment, wrap: `None / Letters / Words / NewLines / Clip { ellipsis } / Fade { length }` |
+| `Text` | content, color, size, font, alignment, wrapping, optional `TextInput` |
 | `Image` | `ImageId` source, tint (gradient ok), fit `Contain / Cover / Fill / None`; drawn above the background, below text |
 | `Tooltip` | a `Node` shown after a hover delay, with fade in/out |
 | `Scroll` | child offset, smooth scrolling, wheel/track pad with unused deltas passed to ancestor scroll views, optional `ScrollBar` with a draggable thumb |
@@ -188,6 +188,41 @@ bidirectional layout, system font fallback, and color emoji where suitable fonts
 The shaping backend caches layout by text and width and uses the same instanced glyph atlas
 renderer. Headless rendering exposes the same opt-in method. Custom integrations can use
 `AppContext::set_text_measurer` and `AppContext::set_text_renderer`.
+
+### Editable text
+
+```rust
+use octlui::{node, components::{Text, TextInput}};
+
+let search = node()
+    .id("search")
+    .size(260.0, 36.0)
+    .padding(8.0)
+    .background(0x28283a)
+    .text(Text::new("").input(
+        TextInput::new()
+            .prompt("Search")
+            .caret_color(0x93c5fd)
+            .enabled(true),
+    ));
+```
+
+The field retains its value and editing history across view rebuilds. Use a stable ID to
+preserve them when the field moves among siblings. Changing the declared `Text::content`
+replaces the value. Attach `Node::on_text_change` to receive a `TextChangeEvent` with the new
+value after edits, undo, and redo. Call `cx.notify()` from the listener if other parts of the
+view depend on that value.
+
+Inputs are single-line by default. Use `multiline(true)` for line breaks and word or letter
+wrapping, or `enabled(false)` for a read-only field with selection and copying. Inputs always
+use the built-in Unicode shaping backend so the glyphs, caret, and selection share a layout.
+
+Click or Tab to focus, drag to select, double-click for a word, or triple-click for a
+paragraph. The editor handles character, word, line, paragraph, document, and page
+navigation, Shift selection, clipboard commands, and undo/redo. It uses Ctrl-based
+shortcuts on Windows and Linux, and Command, Option, and Control text bindings on macOS.
+Unclaimed keys continue through the app's key bindings and `on_key_down` handlers.
+Single-line fields leave Enter available for submission handlers.
 
 ## Images
 

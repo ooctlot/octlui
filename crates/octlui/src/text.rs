@@ -5,7 +5,7 @@ mod shaped;
 pub use font_kit::error::FontLoadingError;
 pub use native::NativeTextMeasurer;
 pub(crate) use native::Fonts;
-pub(crate) use shaped::ShapedText;
+pub(crate) use shaped::{Layout as ShapedLayout, ShapedText};
 
 /// Failure to find or open an installed font.
 #[derive(Debug)]

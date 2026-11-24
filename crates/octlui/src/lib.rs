@@ -18,6 +18,7 @@ pub(crate) mod paint;
 pub mod render;
 pub mod style;
 pub mod text;
+mod text_input;
 pub(crate) mod ui;
 
 pub use action::{Action, Event, Key, KeyBinding, Keymap, Keystroke, Modifiers};

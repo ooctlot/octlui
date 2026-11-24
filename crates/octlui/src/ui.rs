@@ -14,9 +14,14 @@ use crate::node::Node;
 use crate::paint::Painter;
 use crate::render::RenderList;
 use crate::style::Axis;
+use crate::text::ShapedText;
+use crate::text_input::Editor;
 use std::any::Any;
 use std::sync::Arc;
 use std::time::Duration;
+
+mod input;
+pub(crate) use input::{ImeTarget, InputHit, InputKey, PasteTarget};
 
 /// A region that can be hit by the pointer, in paint order.
 pub(crate) struct Hit {
@@ -78,6 +83,7 @@ pub(crate) struct NodeState {
     bar_hold: f32,
     pub spring: Option<SpringSet>,
     reflow: Option<Box<ReflowSpring>>,
+    pub editor: Option<Box<Editor>>,
 }
 
 struct HoverEntry {
@@ -140,6 +146,8 @@ pub(crate) struct Ui {
     tooltip: TooltipState,
     pressed: Option<(u64, MouseButton)>,
     drag: Option<BarDrag>,
+    input: input::InputState,
+    pub input_text: ShapedText,
     pub focus: Option<u64>,
     pub mods: crate::action::Modifiers,
     layout_dirty: bool,
@@ -179,6 +187,8 @@ impl Ui {
             tooltip: TooltipState::default(),
             pressed: None,
             drag: None,
+            input: input::InputState::default(),
+            input_text: ShapedText::default(),
             focus: None,
             mods: Default::default(),
             layout_dirty: true,
@@ -203,13 +213,26 @@ impl Ui {
         self.scroll_nodes.clear();
         self.spring_nodes.clear();
         self.reflow_nodes.clear();
-        let Ui { arena, states, scroll_nodes, spring_nodes, reflow_nodes, .. } = self;
+        let Ui { arena, states, scroll_nodes, spring_nodes, reflow_nodes, input: input_state, .. } = self;
         for (i, n) in arena.nodes.iter_mut().enumerate() {
-            if n.scroll.is_none() && n.spring.is_none() {
+            if n.scroll.is_none() && n.spring.is_none() && n.text.as_ref().is_none_or(|t| t.input.is_none()) {
                 continue;
             }
             let st = states.entry(n.key).or_default();
             st.seen = frame;
+            if let Some(text) = &mut n.text
+                && let Some(input) = &text.input
+            {
+                let editor = st.editor.get_or_insert_with(|| Box::new(Editor::new(text, input)));
+                let revision = editor.revision;
+                editor.reconcile(text, input);
+                if editor.revision != revision {
+                    input_state.cancel_drag(n.key);
+                }
+                text.content = editor.value().clone();
+            } else {
+                st.editor = None;
+            }
             if let Some(s) = &n.scroll {
                 scroll_nodes.push(i as u32);
                 match s.offset {
@@ -234,6 +257,7 @@ impl Ui {
                 st.reflow = None;
             }
         }
+        self.input.reconcile(&mut self.states, self.focus, frame);
         if frame % 300 == 0 {
             self.states.retain(|_, s| s.seen + 300 >= frame);
         }
@@ -256,7 +280,7 @@ impl Ui {
     }
 
     pub fn set_focus(&mut self, id: Option<&Id>) {
-        self.focus = id.map(|i| i.hash);
+        self.focus_to(id.map(|i| i.hash));
     }
 
     fn focus_idx(&self) -> Option<usize> {
@@ -296,6 +320,7 @@ impl Ui {
         let (springs, visual_geometry) = self.update_springs(dt);
         animating |= springs | self.reflow_active;
         animating |= self.tick_tooltip(dt, elapsed, env);
+        animating |= self.tick_input(elapsed);
         self.paint(env.images);
         (animating, layout_dirty || reflow || moved || visual_geometry)
     }
@@ -550,11 +575,15 @@ impl Ui {
         self.list.clear();
         self.hits.clear();
         self.bars.clear();
-        let Ui { arena, states, list, hits, bars, tooltip, size, .. } = self;
+        let input_focus = self.input_focus();
+        let Ui { arena, states, list, hits, bars, tooltip, size, input, input_text, .. } = self;
+        input.hits.clear();
         {
-            let mut p = Painter::new(arena, states, list, images);
+            let mut p = Painter::new(arena, states, list, images, input_text);
             p.hits = Some(hits);
             p.bars = Some(bars);
+            p.inputs = Some(&mut input.hits);
+            p.input_focus = input_focus;
             p.watch = tooltip.owner;
             p.paint_tree(Vec2::ZERO, 1.0);
             if let Some(r) = p.watched_rect {
@@ -571,7 +600,13 @@ impl Ui {
                 }
                 x = x.min(size.x - ts.x).max(0.0);
                 y = y.max(0.0);
-                Painter::new(&tooltip.arena, states, list, images).paint_tree(Vec2::new(x, y), tooltip.alpha);
+                Painter::new(&tooltip.arena, states, list, images, input_text)
+                    .paint_tree(Vec2::new(x, y), tooltip.alpha);
+            }
+        }
+        for (key, hit) in &input.hits {
+            if let Some(editor) = states.get_mut(key).and_then(|state| state.editor.as_mut()) {
+                editor.scroll = hit.scroll;
             }
         }
     }
@@ -600,6 +635,7 @@ impl Ui {
             }
             return false;
         }
+        let selecting = pos.is_some() && self.drag_input(p);
         let mut new = Vec::new();
         let mut tip = None;
         let mut cur = self.hit_test(p);
@@ -628,7 +664,7 @@ impl Ui {
         let changed = self.hover.len() != new.len() || self.hover.iter().zip(&new).any(|(a, b)| a.key != b.key);
         self.hover = new;
         self.tooltip.target = tip;
-        changed
+        changed || selecting
     }
 
     pub fn pointer_left(&mut self, env: &mut Env) {
@@ -673,6 +709,7 @@ impl Ui {
     }
 
     pub fn pointer_button(&mut self, button: MouseButton, pressed: bool, pos: Option<Vec2>, env: &mut Env) {
+        let moved = pos.is_some() && pos != self.mouse;
         if let Some(p) = pos {
             self.mouse = Some(p);
         }
@@ -680,6 +717,12 @@ impl Ui {
         let left = button == MouseButton::Left;
 
         if !pressed {
+            if left {
+                if moved {
+                    self.drag_input(p);
+                }
+                self.input.end_drag();
+            }
             let was_dragging = self.drag.take().is_some();
             let press = self.pressed.take();
             if was_dragging || !left {
@@ -731,7 +774,8 @@ impl Ui {
             cur = self.parent(i);
         }
         if left {
-            self.focus = focus;
+            self.focus_to(focus);
+            self.click_input(p);
         }
         if let Some(f) = down {
             env.call(&f, &MouseDownEvent { position: p, button, modifiers: self.mods });
@@ -897,6 +941,7 @@ mod tests {
         clicks: u32,
         hovered: bool,
         dropped: usize,
+        text: Arc<str>,
     }
 
     // By-value action handler, as in the design sketch.
@@ -936,7 +981,8 @@ mod tests {
         }
         fn frame(&mut self, dt: f32) -> bool {
             let mut tm = PlaceholderMeasurer;
-            self.ui.frame(dt, dt, &mut LayoutEnv { text: &mut tm, images: &mut self.images }).0
+            let input_text = self.ui.input_text.clone();
+            self.ui.frame(dt, dt, &mut LayoutEnv { text: &mut tm, input_text: Some(&input_text), images: &mut self.images }).0
         }
         fn env(&mut self) -> (&mut Ui, Env<'_>) {
             (&mut self.ui, Env { state: &mut self.state, cx: &mut self.cx })
@@ -959,6 +1005,87 @@ mod tests {
             }
             self.keymap = km;
         }
+        fn edit(&mut self, key: Option<Key>, mods: Modifiers, text: Option<&str>) -> InputKey {
+            let (ui, mut env) = self.env();
+            ui.mods = mods;
+            ui.input_key(key, text, &mut env)
+        }
+    }
+
+    #[test]
+    fn input_retains_in_place_edits_and_gates_clipboard_mutations() {
+        use crate::text_input::ClipboardCommand;
+        fn view(cx: &Context<State>, content: &str, enabled: bool) -> Node {
+            node().id("input").size(180.0, 36.0).text(
+                Text::new(content).input(TextInput::new().enabled(enabled).prompt("Type here")),
+            ).on_text_change(cx.listener(|state: &mut State, _: &mut Context<State>, event: TextChangeEvent| {
+                state.text = event.content;
+            }))
+        }
+        let primary = Modifiers::primary();
+        let mut h = Harness::new(|cx| view(cx, "", true));
+        assert!(h.ui.list.ops.iter().any(|op| matches!(op, DrawOp::InputText(t) if &*t.content == "Type here")));
+        h.click(12.0, 15.0);
+        assert_eq!(h.ui.focus, Some(Id::new("input").hash));
+        assert!(matches!(h.edit(None, Modifiers::NONE, Some("one e\u{301}")), InputKey::Handled));
+        assert_eq!(&*h.state.text, "one e\u{301}");
+        h.ui.set_root(view(&h.cx, "", true));
+        h.frame(0.0);
+        assert_eq!(&*h.ui.arena.nodes[0].text.as_ref().unwrap().content, "one e\u{301}");
+        h.edit(Some(Key::Left), Modifiers::SHIFT, None);
+        assert!(matches!(h.edit(Some(Key::C), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "e\u{301}"));
+        let request = h.ui.paste_target().unwrap();
+        {
+            let (ui, mut env) = h.env();
+            assert!(ui.paste(request, "two\r\nwords", &mut env));
+            assert!(!ui.paste(request, "unexpected", &mut env));
+        }
+        assert_eq!(&*h.state.text, "one two words");
+        h.edit(Some(Key::Z), primary, None);
+        assert_eq!(&*h.state.text, "one e\u{301}");
+        h.edit(Some(Key::Z), primary | Modifiers::SHIFT, None);
+        assert_eq!(&*h.state.text, "one two words");
+        let old_paste = h.ui.paste_target().unwrap();
+        h.ui.set_root(view(&h.cx, "locked", false));
+        h.edit(Some(Key::A), primary, None);
+        assert!(matches!(h.edit(Some(Key::X), primary, None), InputKey::Clipboard(ClipboardCommand::Copy(t)) if &*t == "locked"));
+        h.edit(Some(Key::Backspace), Modifiers::NONE, None);
+        assert!(h.ui.paste_target().is_none());
+        {
+            let (ui, mut env) = h.env();
+            assert!(!ui.paste(old_paste, "unexpected", &mut env));
+        }
+        assert_eq!(&*h.ui.arena.nodes[0].text.as_ref().unwrap().content, "locked");
+    }
+
+    #[test]
+    fn input_paints_drag_selection_and_fades_the_configured_caret() {
+        let mut h = Harness::new(|_| node().id("input").size(180.0, 40.0).padding(6.0)
+            .text(Text::new("some text").input(TextInput::new().caret_color(0xff00ff))));
+        let caret_alpha = |h: &Harness| h.ui.list.ops.iter().find_map(|op| match op {
+            DrawOp::Quad(q) if q.fill[..3] == [1.0, 0.0, 1.0] => Some(q.fill[3]),
+            _ => None,
+        });
+        {
+            let (ui, mut env) = h.env();
+            ui.pointer_button(MouseButton::Left, true, Some(Vec2::new(6.0, 20.0)), &mut env);
+            ui.pointer_moved(Some(Vec2::new(140.0, 20.0)), &mut env);
+            ui.pointer_button(MouseButton::Left, false, Some(Vec2::new(140.0, 20.0)), &mut env);
+        }
+        assert!(matches!(h.edit(Some(Key::Copy), Modifiers::NONE, None),
+            InputKey::Clipboard(crate::text_input::ClipboardCommand::Copy(t)) if &*t == "some text"));
+        h.frame(0.0);
+        assert_eq!(caret_alpha(&h), Some(1.0));
+        assert!(h.ui.list.ops.iter().any(|op| matches!(op, DrawOp::Quad(q) if q.fill == [0.26, 0.49, 0.88, 0.45])));
+        assert!(h.frame(0.60));
+        assert!((caret_alpha(&h).unwrap() - 0.5).abs() < 0.01);
+        assert!(!h.frame(0.15));
+        assert_eq!(caret_alpha(&h), None);
+        assert!(h.frame(0.37));
+        assert!((caret_alpha(&h).unwrap() - 0.5).abs() < 0.01);
+        h.ui.set_window_focus(false);
+        h.frame(0.0);
+        assert_eq!(caret_alpha(&h), None);
     }
 
     #[test]
@@ -1156,6 +1283,7 @@ mod tests {
         h.mv(10., 10.);
         assert!(h.ui.wheel(Vec2::new(0., -40.)));
         let (moving, geometry_changed) = h.ui.frame(0.016, 0.016, &mut LayoutEnv {
+            input_text: None,
             text: &mut NoMeasure,
             images: &mut h.images,
         });
@@ -1323,7 +1451,7 @@ mod tests {
         for fit in [ImageFit::Contain, ImageFit::Cover, ImageFit::Fill, ImageFit::None] {
             ui.set_root(node().size(fixed(100.0), fixed(100.0)).image(Image::new(id).fit(fit)));
             let mut tm = PlaceholderMeasurer;
-            ui.frame(0.016, 0.016, &mut LayoutEnv { text: &mut tm, images: &mut store });
+            ui.frame(0.016, 0.016, &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut store });
             let DrawOp::Image(_, q) = ui.list.ops.last().unwrap().clone() else { panic!() };
             quads.push(q);
         }

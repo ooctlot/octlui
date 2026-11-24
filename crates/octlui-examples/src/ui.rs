@@ -79,6 +79,17 @@ pub(crate) fn bar() -> ScrollBar {
     ScrollBar::scroll_bar().thickness(7.).bar_color(0x719991)
 }
 
+pub(crate) fn input_field(id: &'static str, height: f32, text: Text) -> Node {
+    node()
+        .id(id)
+        .size(grow(), height)
+        .padding((12., 8.))
+        .corner_radius(6.)
+        .background(PAPER)
+        .border(LINE, 1.)
+        .text(text.size(17.).color(INK))
+}
+
 pub(crate) fn image_preview(id: Option<ImageId>, mode: ImageFit, tint: Fill) -> Node {
     let preview = node()
         .size(grow(), 132.)

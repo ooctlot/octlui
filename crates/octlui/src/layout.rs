@@ -13,7 +13,8 @@ use crate::id::{Id, mix};
 use crate::image::ImageStore;
 use crate::node::{Handlers, Node};
 use crate::style::*;
-use crate::text::TextMeasurer;
+use crate::text::{ShapedText, TextMeasurer};
+use crate::text_input::{input_wrap, normalize};
 use std::sync::Arc;
 
 pub(crate) const NONE: u32 = u32::MAX;
@@ -140,6 +141,7 @@ fn convert(node: Node, parent: u32, key: u64) -> (LNode, Vec<Node>) {
         }
     }
 
+    let focusable = focusable || text.as_ref().is_some_and(|text| text.input.is_some());
     let n = LNode {
         key,
         is_floating: parent != NONE && floating.is_some(),
@@ -231,6 +233,7 @@ impl LNode {
 
 pub(crate) struct LayoutEnv<'a> {
     pub text: &'a mut dyn TextMeasurer,
+    pub input_text: Option<&'a ShapedText>,
     pub images: &'a mut ImageStore,
 }
 
@@ -253,6 +256,21 @@ pub(crate) fn resolve_sizes(arena: &mut Arena, viewport: Vec2, env: &mut LayoutE
 fn leaf_content(node: &LNode, axis: Axis, env: &mut LayoutEnv) -> Option<(f32, f32)> {
     let pad = node.pad_along(axis);
     if let Some(t) = &node.text {
+        if let Some(input) = &t.input {
+            let value = normalize(if t.content.is_empty() { &input.prompt } else { &t.content }, input.multiline);
+            let width = (axis == Axis::Y).then(|| (node.size.x - node.pad_along(Axis::X)).max(0.0));
+            let wrap = input_wrap(t, input);
+            let measured = if let Some(shaping) = env.input_text {
+                shaping.layout(&value, t.font, t.size, wrap, width).size
+            } else {
+                env.text.measure(&Text::new(value).font(t.font).size(t.size).wrap(wrap), width)
+            };
+            let natural = measured.get(axis).max(t.size.max(0.0));
+            return Some(match axis {
+                Axis::X => (natural + pad + 1.5, pad + 1.5),
+                Axis::Y => (natural + pad, natural + pad),
+            });
+        }
         return Some(match axis {
             Axis::X => {
                 let nat = env.text.measure(t, None).x;
@@ -627,7 +645,7 @@ mod tests {
         a.build(root);
         let mut tm = PlaceholderMeasurer;
         let mut imgs = ImageStore::default();
-        layout(&mut a, Vec2::new(w, h), &mut LayoutEnv { text: &mut tm, images: &mut imgs });
+        layout(&mut a, Vec2::new(w, h), &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut imgs });
         a
     }
     fn r(a: &Arena, i: usize) -> Rect {
@@ -775,7 +793,7 @@ mod tests {
         a.nodes[0].scroll_offset = Vec2::new(0.0, 500.0);
         let mut tm = PlaceholderMeasurer;
         let mut imgs = ImageStore::default();
-        layout(&mut a, Vec2::new(400.0, 400.0), &mut LayoutEnv { text: &mut tm, images: &mut imgs });
+        layout(&mut a, Vec2::new(400.0, 400.0), &mut LayoutEnv { text: &mut tm, input_text: None, images: &mut imgs });
         assert_eq!(a.nodes[0].scroll_max, Vec2::new(0.0, 200.0));
         assert_eq!(a.nodes[0].scroll_offset.y, 200.0);
         assert_eq!(a.nodes[1].rect.y, -200.0);

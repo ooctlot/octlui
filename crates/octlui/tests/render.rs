@@ -32,6 +32,30 @@ fn solid_rect_and_clear_color() {
 }
 
 #[test]
+fn editable_text_draws_and_clips_its_prompt() {
+    use octlui::components::{Text, TextInput};
+
+    let Some(mut r) = renderer(160, 52) else { return };
+    let shot = r.render(node().size(75.0, 38.0).padding(5.0).text(
+        Text::new("").size(20.0).input(
+            TextInput::new().prompt("Long prompt text").prompt_color(0x00ff00),
+        ),
+    ));
+    let mut green_pixels = 0;
+    for y in 0..shot.height {
+        for x in 0..shot.width {
+            let [red, green, blue, _] = shot.pixel(x, y);
+            if green > 24 && red == 0 && blue == 0 {
+                green_pixels += 1;
+                assert!((5..70).contains(&x));
+                assert!((5..33).contains(&y));
+            }
+        }
+    }
+    assert!(green_pixels > 20);
+}
+
+#[test]
 fn corner_radius_cuts_corners() {
     let Some(mut r) = renderer(64, 64) else { return };
     let shot = r.render(node().size(fixed(64.0), fixed(64.0)).corner_radius(20.0).background(0xffffff));

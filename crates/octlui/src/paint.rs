@@ -6,7 +6,9 @@ use crate::image::ImageStore;
 use crate::layout::Arena;
 use crate::render::{DrawOp, QuadInstance, RenderList, TextRun};
 use crate::style::*;
-use crate::ui::{BarHit, Hit, NodeState, Visual};
+use crate::text::ShapedText;
+use crate::text_input::{Editor, input_wrap, normalize};
+use crate::ui::{BarHit, Hit, InputHit, NodeState, Visual};
 use crate::id::KeyMap;
 
 pub(crate) struct Painter<'a> {
@@ -15,6 +17,9 @@ pub(crate) struct Painter<'a> {
     pub list: &'a mut RenderList,
     pub hits: Option<&'a mut Vec<Hit>>,
     pub bars: Option<&'a mut Vec<BarHit>>,
+    pub inputs: Option<&'a mut KeyMap<InputHit>>,
+    pub input_text: &'a ShapedText,
+    pub input_focus: Option<u64>,
     pub images: &'a mut ImageStore,
     /// When set, the visual rect of the node with this key is reported through `watched_rect`.
     pub watch: Option<u64>,
@@ -42,6 +47,7 @@ impl<'a> Painter<'a> {
         states: &'a KeyMap<NodeState>,
         list: &'a mut RenderList,
         images: &'a mut ImageStore,
+        input_text: &'a ShapedText,
     ) -> Self {
         Self {
             arena,
@@ -49,6 +55,9 @@ impl<'a> Painter<'a> {
             list,
             hits: None,
             bars: None,
+            inputs: None,
+            input_text,
+            input_focus: None,
             images,
             watch: None,
             watched_rect: None,
@@ -151,9 +160,11 @@ impl<'a> Painter<'a> {
 
         // ---- text ----
         if let Some(t) = &n.text {
-            if !t.content.is_empty() {
-                let color = paints.and_then(|p| p.text.as_ref()).map_or(t.color, |p| p.value());
-                let area = rect.shrink(n.padding());
+            let color = paints.and_then(|p| p.text.as_ref()).map_or(t.color, |p| p.value());
+            let area = rect.shrink(n.padding());
+            if let Some(input) = &t.input {
+                self.input(n.key, t, input, area, clip.intersect(&area), color, alpha);
+            } else if !t.content.is_empty() {
                 self.list.ops.push(DrawOp::Text(TextRun {
                     rect: area,
                     clip: match t.wrap {
@@ -190,6 +201,63 @@ impl<'a> Painter<'a> {
         if let Some(s) = &n.scroll {
             if let Some(bar) = &s.scroll_bar {
                 self.scroll_bars(i, s, bar, rect, clip.intersect(&rect), alpha);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn input(&mut self, key: u64, text: &Text, input: &TextInput, area: Rect, clip: Rect, color: Fill, alpha: f32) {
+        if clip.is_empty() {
+            return;
+        }
+        let fallback;
+        let editor = if let Some(editor) = self.inputs.as_ref()
+            .and_then(|_| self.states.get(&key))
+            .and_then(|state| state.editor.as_deref())
+        {
+            editor
+        } else {
+            fallback = Editor::new(text, input);
+            &fallback
+        };
+        let view = editor.view(self.input_text, text, input, area);
+        let focused = self.input_focus == Some(key);
+        let caret = view.caret_rect();
+        let caret_alpha = editor.caret_alpha();
+        if let Some(inputs) = &mut self.inputs {
+            inputs.insert(key, InputHit { area, clip, scroll: view.scroll, caret });
+        }
+        if focused {
+            for rect in view.selection_rects(false) {
+                self.quad(rect, clip, [0.0; 4], &input.selection_color.into(), &Fill::NONE, 0.0, alpha);
+            }
+        }
+        let (content, color) = if view.value.is_empty() {
+            (normalize(&input.prompt, input.multiline), input.prompt_color.into())
+        } else {
+            (view.value.clone(), color)
+        };
+        if !content.is_empty() {
+            self.list.ops.push(DrawOp::InputText(TextRun {
+                rect: view.rect,
+                clip,
+                content,
+                color: color.mul_alpha(alpha),
+                size: text.size,
+                font: text.font,
+                align: text.align,
+                wrap: input_wrap(text, input),
+            }));
+        }
+        if focused {
+            let color = input.caret_color.into();
+            for rect in view.selection_rects(true) {
+                self.quad(rect, clip, [0.0; 4], &color, &Fill::NONE, 0.0, alpha);
+            }
+            if let Some(rect) = caret
+                && caret_alpha > 0.0
+            {
+                self.quad(rect, clip, [0.0; 4], &color, &Fill::NONE, 0.0, alpha * caret_alpha);
             }
         }
     }

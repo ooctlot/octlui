@@ -49,6 +49,9 @@ pub struct Text {
     pub align: Align,
     #[octlui::property]
     pub wrap: TextWrap,
+    /// Enables a retained text editor on the node.
+    #[octlui::property(boxed)]
+    pub input: Option<Box<TextInput>>,
 }
 impl Text {
     pub fn new(content: impl Into<Arc<str>>) -> Self {
@@ -59,6 +62,7 @@ impl Text {
             font: FontId::DEFAULT,
             align: Align::Start,
             wrap: TextWrap::Words,
+            input: None,
         }
     }
 }
@@ -70,6 +74,44 @@ impl From<&str> for Text {
 impl From<String> for Text {
     fn from(s: String) -> Self {
         Text::new(s)
+    }
+}
+
+/// Options for [editable text](Text::input).
+///
+/// The node is focusable and retains edits across view rebuilds. Give it a stable ID if it
+/// can move among siblings. Changing the declared [Text::content] replaces the value.
+/// Use [Node::on_text_change] to observe edits and keep a copy in application state.
+#[derive(Clone, Debug, PartialEq)]
+#[octlui::builder(name = "new")]
+pub struct TextInput {
+    /// Allows text changes. Read-only inputs still support navigation, selection and copy.
+    #[octlui::property]
+    pub enabled: bool,
+    /// Shown while the value is empty.
+    #[octlui::property(into)]
+    pub prompt: Arc<str>,
+    #[octlui::property(into)]
+    pub prompt_color: Color,
+    #[octlui::property(into)]
+    pub caret_color: Color,
+    #[octlui::property(into)]
+    pub selection_color: Color,
+    /// Allows line breaks. Multiline inputs honor word and letter wrapping.
+    #[octlui::property]
+    pub multiline: bool,
+}
+
+impl Default for TextInput {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            prompt: Arc::from(""),
+            prompt_color: Color::hex(0x8c8c9c),
+            caret_color: Color::WHITE,
+            selection_color: Color::rgba(0.26, 0.49, 0.88, 0.45),
+            multiline: false,
+        }
     }
 }
 

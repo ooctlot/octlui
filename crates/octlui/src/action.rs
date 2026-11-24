@@ -59,6 +59,7 @@ keys! {
     Enter => "enter", Escape => "escape", Space => "space", Tab => "tab",
     Backspace => "backspace", Delete => "delete", Insert => "insert",
     Home => "home", End => "end", PageUp => "pageup", PageDown => "pagedown",
+    Copy => "copy", Cut => "cut", Paste => "paste", Undo => "undo", Redo => "redo",
     Up => "up", Down => "down", Left => "left", Right => "right",
     Minus => "-", Equal => "=", Comma => ",", Period => ".", Slash => "/",
     Backslash => "\\", Semicolon => ";", Quote => "'", Backquote => "`",

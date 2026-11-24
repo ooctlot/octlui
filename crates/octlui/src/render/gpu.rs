@@ -252,6 +252,10 @@ impl Renderer {
         self.native.set_shaped(text);
     }
 
+    pub(crate) fn set_input_text(&mut self, text: crate::text::ShapedText) {
+        self.native.set_input_text(text);
+    }
+
     /// Installs a text renderer (see [`TextRenderer`]).
     pub fn set_text_renderer(&mut self, t: Box<dyn TextRenderer>) {
         self.text = Some(t);
@@ -374,9 +378,18 @@ impl Renderer {
                         self.push_quad(Some(*id), *q);
                     }
                 }
-                DrawOp::Text(t) if self.text.is_none() => {
+                DrawOp::Text(t) if self.text.is_some() => {
+                    let i = self.runs.len();
+                    self.runs.push(t.clone());
+                    match self.batches.last_mut() {
+                        Some(Batch::Text { range }) => range.end = i + 1,
+                        _ => self.batches.push(Batch::Text { range: i..i + 1 }),
+                    }
+                }
+                DrawOp::InputText(t) | DrawOp::Text(t) => {
                     self.glyphs.clear();
-                    self.native.prepare(gpu, &self.texture_layout, &self.sampler, t, scale, &mut self.colors, &mut self.glyphs);
+                    let input = matches!(op, DrawOp::InputText(_));
+                    self.native.prepare(gpu, &self.texture_layout, &self.sampler, t, input, scale, &mut self.colors, &mut self.glyphs);
                     for &(page, quad) in &self.glyphs {
                         let i = self.instances.len() as u32;
                         self.instances.push(quad);
@@ -384,14 +397,6 @@ impl Renderer {
                             Some(Batch::Glyphs { page: prev, range }) if *prev == page => range.end = i + 1,
                             _ => self.batches.push(Batch::Glyphs { page, range: i..i + 1 }),
                         }
-                    }
-                }
-                DrawOp::Text(t) => {
-                    let i = self.runs.len();
-                    self.runs.push(t.clone());
-                    match self.batches.last_mut() {
-                        Some(Batch::Text { range }) => range.end = i as usize + 1,
-                        _ => self.batches.push(Batch::Text { range: i..i + 1 }),
                     }
                 }
             }

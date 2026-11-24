@@ -1,5 +1,6 @@
 use octlui::{components::*, geometry::Vec2, image::ImageId, style::*, *};
 use std::path::PathBuf;
+use std::sync::Arc;
 use ui::*;
 
 mod spring_demo;
@@ -58,6 +59,9 @@ struct Gallery {
     image: Option<ImageId>,
     lazy_image: Option<ImageId>,
     loaded_font: Option<FontId>,
+    input_value: Arc<str>,
+    input_read_only: bool,
+    input_wrap: TextWrap,
 }
 
 fn gallery(state: &mut Gallery, cx: &mut Cx) -> Node {

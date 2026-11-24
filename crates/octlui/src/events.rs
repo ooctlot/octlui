@@ -46,6 +46,13 @@ pub struct KeyDownEvent {
 }
 impl Event for KeyDownEvent {}
 
+/// An edit to a node's [text input](crate::components::TextInput).
+#[derive(Clone, Debug)]
+pub struct TextChangeEvent {
+    pub content: Arc<str>,
+}
+impl Event for TextChangeEvent {}
+
 #[derive(Clone, Debug)]
 pub struct FileDropEvent {
     pub paths: Vec<PathBuf>,
